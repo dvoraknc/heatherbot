@@ -1,0 +1,595 @@
+{
+  "1": {
+    "inputs": {
+      "ckpt_name": "RealVisXL_V5.0_Lightning_fp16.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "Load Checkpoint"
+    }
+  },
+  "3": {
+    "inputs": {
+      "text": "photo of hevdvorak woman, 35 year old woman, clean face, smooth skin, healthy body, natural lighting, iphone selfie, authentic, amateur photo",
+      "clip": [
+        "37",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt) (Positive)"
+    }
+  },
+  "4": {
+    "inputs": {
+      "text": "cum on face, fluid on face, wet face, substance on face, obscured face, covered face, blurry, out of focus, low quality, deformed face, double face, asymmetrical eyes, watermark, text, extra limbs, extra fingers, misshapen hands, wrinkles, bony, emaciated, aged skin, thin, anorexic, sagging skin, extreme close up, looking down at camera, fish eye lens",
+      "clip": [
+        "37",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt) (Negative)"
+    }
+  },
+  "33": {
+    "inputs": {
+      "preset": "FACEID PLUS V2",
+      "lora_strength": 0.75,
+      "provider": "CUDA",
+      "model": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "IPAdapterUnifiedLoaderFaceID",
+    "_meta": {
+      "title": "IPAdapter FaceID Loader"
+    }
+  },
+  "34": {
+    "inputs": {
+      "weight": 0.25,
+      "weight_faceidv2": 0.5,
+      "weight_type": "linear",
+      "combine_embeds": "concat",
+      "start_at": 0.0,
+      "end_at": 0.3,
+      "embeds_scaling": "V only",
+      "model": [
+        "33",
+        0
+      ],
+      "ipadapter": [
+        "33",
+        1
+      ],
+      "image": [
+        "26",
+        0
+      ]
+    },
+    "class_type": "IPAdapterFaceID",
+    "_meta": {
+      "title": "IPAdapter FaceID Apply"
+    }
+  },
+  "5": {
+    "inputs": {
+      "seed": 1038167537894106,
+      "steps": 15,
+      "cfg": 1.5,
+      "sampler_name": "euler",
+      "scheduler": "sgm_uniform",
+      "denoise": 1,
+      "model": [
+        "1",
+        0
+      ],
+      "positive": [
+        "3",
+        0
+      ],
+      "negative": [
+        "4",
+        0
+      ],
+      "latent_image": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler (Initial)"
+    }
+  },
+  "6": {
+    "inputs": {
+      "width": 768,
+      "height": 1344,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Portrait (768x1344)"
+    }
+  },
+  "7": {
+    "inputs": {
+      "samples": [
+        "5",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "9": {
+    "inputs": {
+      "filename_prefix": "ComfyUI",
+      "images": [
+        "7",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Preview (No Face Swap)"
+    }
+  },
+  "11": {
+    "inputs": {
+      "filename_prefix": "ComfyUI_FaceSwap",
+      "images": [
+        "43",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save FINAL (Face Swapped + Blended + Hand Fixed)"
+    }
+  },
+  "12": {
+    "inputs": {
+      "seed": 827972901139701,
+      "steps": 6,
+      "cfg": 1.5,
+      "sampler_name": "euler",
+      "scheduler": "sgm_uniform",
+      "denoise": 0.25,
+      "model": [
+        "37",
+        0
+      ],
+      "positive": [
+        "3",
+        0
+      ],
+      "negative": [
+        "4",
+        0
+      ],
+      "latent_image": [
+        "14",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler (Refine)"
+    }
+  },
+  "13": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "width": 1152,
+      "height": 2016,
+      "crop": "disabled",
+      "image": [
+        "15",
+        0
+      ]
+    },
+    "class_type": "ImageScale",
+    "_meta": {
+      "title": "Upscale Image By"
+    }
+  },
+  "14": {
+    "inputs": {
+      "pixels": [
+        "13",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode"
+    }
+  },
+  "15": {
+    "inputs": {
+      "samples": [
+        "5",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "16": {
+    "inputs": {
+      "samples": [
+        "12",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "35": {
+    "inputs": {
+      "lora_name": "LLabiav3.1.safetensors",
+      "strength_model": 0.7,
+      "strength_clip": 0.7,
+      "model": [
+        "1",
+        0
+      ],
+      "clip": [
+        "1",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Load LoRA (Large Labia SDXL)"
+    }
+  },
+  "36": {
+    "inputs": {
+      "lora_name": "Detailed_nipples_xl.safetensors",
+      "strength_model": 0.7,
+      "strength_clip": 0.7,
+      "model": [
+        "35",
+        0
+      ],
+      "clip": [
+        "35",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Load LoRA (Detailed Nipples XL)"
+    }
+  },
+  "37": {
+    "inputs": {
+      "lora_name": "Nipple_Size_Slider_SDXL.safetensors",
+      "strength_model": 0.0,
+      "strength_clip": 0.0,
+      "model": [
+        "36",
+        0
+      ],
+      "clip": [
+        "36",
+        1
+      ]
+    },
+    "class_type": "LoraLoader",
+    "_meta": {
+      "title": "Load LoRA (Nipple Size Slider)"
+    }
+  },
+  "20": {
+    "inputs": {
+      "width": 1216,
+      "height": 832,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Landscape (1216x832)"
+    }
+  },
+  "26": {
+    "inputs": {
+      "image": "your_face.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "YOUR FACE PHOTO"
+    }
+  },
+  "27": {
+    "inputs": {
+      "enabled": true,
+      "swap_model": "inswapper_128.onnx",
+      "facedetection": "retinaface_resnet50",
+      "face_restore_model": "codeformer-v0.1.0.pth",
+      "face_restore_visibility": 0.85,
+      "codeformer_weight": 0.85,
+      "detect_gender_input": "female",
+      "detect_gender_source": "female",
+      "input_faces_index": "0",
+      "source_faces_index": "0",
+      "console_log_level": 1,
+      "input_image": [
+        "16",
+        0
+      ],
+      "source_image": [
+        "26",
+        0
+      ]
+    },
+    "class_type": "ReActorFaceSwap",
+    "_meta": {
+      "title": "ReActor Face Swap"
+    }
+  },
+  "29": {
+    "inputs": {
+      "pixels": [
+        "27",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAEEncode (Face Swap)"
+    }
+  },
+  "30": {
+    "inputs": {
+      "seed": 123456789,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "sgm_uniform",
+      "denoise": 0.08,
+      "model": [
+        "36",
+        0
+      ],
+      "positive": [
+        "3",
+        0
+      ],
+      "negative": [
+        "4",
+        0
+      ],
+      "latent_image": [
+        "29",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler (Blend Face)"
+    }
+  },
+  "31": {
+    "inputs": {
+      "samples": [
+        "30",
+        0
+      ],
+      "vae": [
+        "1",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAEDecode (Blended)"
+    }
+  },
+  "32": {
+    "inputs": {
+      "filename_prefix": "ComfyUI_NoBlend",
+      "images": [
+        "27",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Face Swap (No Blend - Compare)"
+    }
+  },
+  "38": {
+    "inputs": {
+      "model_name": "bbox/hand_yolov8s.pt"
+    },
+    "class_type": "UltralyticsDetectorProvider",
+    "_meta": {
+      "title": "Hand Detector (YOLO)"
+    }
+  },
+  "39": {
+    "inputs": {
+      "bbox_detector": [
+        "38",
+        0
+      ],
+      "image": [
+        "31",
+        0
+      ],
+      "threshold": 0.3,
+      "dilation": 10,
+      "crop_factor": 2.0,
+      "drop_size": 10,
+      "labels": "all"
+    },
+    "class_type": "BboxDetectorSEGS",
+    "_meta": {
+      "title": "Detect Hands"
+    }
+  },
+  "40": {
+    "inputs": {
+      "image": [
+        "31",
+        0
+      ],
+      "segs": [
+        "39",
+        0
+      ],
+      "model": [
+        "1",
+        0
+      ],
+      "clip": [
+        "1",
+        1
+      ],
+      "vae": [
+        "1",
+        2
+      ],
+      "guide_size": 384,
+      "guide_size_for": true,
+      "max_size": 768,
+      "seed": 987654321,
+      "steps": 12,
+      "cfg": 1.5,
+      "sampler_name": "euler",
+      "scheduler": "sgm_uniform",
+      "positive": [
+        "3",
+        0
+      ],
+      "negative": [
+        "4",
+        0
+      ],
+      "denoise": 0.4,
+      "feather": 5,
+      "noise_mask": true,
+      "force_inpaint": true,
+      "wildcard": "detailed hands, five fingers, perfect hands, natural hand pose",
+      "cycle": 1
+    },
+    "class_type": "DetailerForEach",
+    "_meta": {
+      "title": "Hand Detailer"
+    }
+  },
+  "41": {
+    "inputs": {
+      "model_name": "bbox/nipples_yolov8s.pt"
+    },
+    "class_type": "UltralyticsDetectorProvider",
+    "_meta": {
+      "title": "Nipple Detector (YOLO)"
+    }
+  },
+  "42": {
+    "inputs": {
+      "bbox_detector": [
+        "41",
+        0
+      ],
+      "image": [
+        "40",
+        0
+      ],
+      "threshold": 0.3,
+      "dilation": 10,
+      "crop_factor": 2.0,
+      "drop_size": 10,
+      "labels": "all"
+    },
+    "class_type": "BboxDetectorSEGS",
+    "_meta": {
+      "title": "Detect Nipples"
+    }
+  },
+  "43": {
+    "inputs": {
+      "image": [
+        "40",
+        0
+      ],
+      "segs": [
+        "42",
+        0
+      ],
+      "model": [
+        "1",
+        0
+      ],
+      "clip": [
+        "1",
+        1
+      ],
+      "vae": [
+        "1",
+        2
+      ],
+      "guide_size": 384,
+      "guide_size_for": true,
+      "max_size": 768,
+      "seed": 123456789,
+      "steps": 12,
+      "cfg": 1.5,
+      "sampler_name": "euler",
+      "scheduler": "sgm_uniform",
+      "positive": [
+        "3",
+        0
+      ],
+      "negative": [
+        "4",
+        0
+      ],
+      "denoise": 0.35,
+      "feather": 5,
+      "noise_mask": true,
+      "force_inpaint": true,
+      "wildcard": "natural nipples, realistic areola, smooth round nipple, natural breast",
+      "cycle": 1
+    },
+    "class_type": "DetailerForEach",
+    "_meta": {
+      "title": "Nipple Detailer"
+    }
+  }
+}
