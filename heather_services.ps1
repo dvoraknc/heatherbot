@@ -61,7 +61,7 @@ $Config = @{
     # Text backend: "llama" (llama-server) or "lmstudio" (LM Studio)
     TextBackend = "llama"
 
-    # llama-server (llama.cpp) — update these to your local paths
+    # llama-server (llama.cpp)
     LlamaServerExe = "C:\llama-cpp\llama-server.exe"
     LlamaServerModel = "C:\Models\your-model-file.gguf"
     LlamaServerGPULayers = 99
@@ -251,12 +251,12 @@ function Start-Bot {
     }
     
     # Build arguments - NOW INCLUDES --personality AND --small-model
-    $botArgs = @($botScript, "--monitoring", "--unfiltered")
+    $botArgs = @($botScript, "--monitoring", "--unfiltered", "--log-dir", $Config.LogDir)
     if ($personalityExists) {
         $botArgs += "--personality"
         $botArgs += $Config.PersonalityFile
     }
-    
+
     # Add small model flag if configured
     if ($Config.SmallModelMode) {
         $botArgs += "--small-model"

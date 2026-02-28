@@ -467,6 +467,24 @@ VOICE_TTS_FAIL_RESPONSES = [
     "Lol sorry, can't do voice rn but I'm still here 😘",
 ]
 
+# Content promise tracker — when the bot's response teases showing/sending content
+# and the user replies with a short follow-up ("let's see it", "show me"), deliver media
+_content_promise_pending: Dict[int, float] = {}  # chat_id -> timestamp
+CONTENT_PROMISE_WINDOW = 300  # 5 min window to follow through
+CONTENT_PROMISE_TRIGGERS = [
+    "get ready", "wait till you see", "about to", "gonna show",
+    "got something for you", "got planned", "worth the wait",
+    "you ain't ready", "have something special", "little surprise",
+    "just wait", "hold on", "give me a sec", "one sec",
+]
+CONTENT_FOLLOWUP_TRIGGERS = [
+    "let's see", "lets see", "lemme see", "let me see",
+    "show me", "where is it", "well", "go ahead",
+    "i'm waiting", "im waiting", "waiting", "come on",
+    "send it", "so", "ok", "okay", "yes", "yeah",
+    "do it", "go on", "please", "cmon", "c'mon",
+]
+
 # Per-user video tracking: chat_id -> set of filenames already sent
 videos_sent_to_user: Dict[int, set] = {}
 
@@ -7429,6 +7447,27 @@ async def handle_text_message(event):
         elif offer_age >= VIDEO_OFFER_WINDOW:
             del _video_offer_pending[chat_id]
 
+    # Content promise follow-through — bot teased sending something, user replied with a short follow-up
+    if chat_id in _content_promise_pending:
+        promise_age = time.time() - _content_promise_pending[chat_id]
+        if promise_age < CONTENT_PROMISE_WINDOW:
+            msg_lower = user_message.lower().strip()
+            if len(msg_lower) < 40 and any(t in msg_lower for t in CONTENT_FOLLOWUP_TRIGGERS):
+                del _content_promise_pending[chat_id]
+                # Try video first, then image
+                sent = await send_video_to_chat(chat_id, event, request_id)
+                if sent:
+                    main_logger.info(f"[{request_id}] Content promise fulfilled (video) for {chat_id}")
+                    return
+                if image_library:
+                    category = gate_image_category(chat_id, get_image_category(user_message))
+                    img_sent = await send_library_image(event, chat_id, category)
+                    if img_sent:
+                        main_logger.info(f"[{request_id}] Content promise fulfilled (image) for {chat_id}")
+                        return
+        else:
+            del _content_promise_pending[chat_id]
+
     # Check for video request
     if is_video_request(user_message):
         if get_warmth_tier(chat_id) == "COLD":
@@ -7721,6 +7760,12 @@ async def handle_text_message(event):
 
         # Increment turn counter for proactive photo tracking
         conversation_turn_count[chat_id] = conversation_turn_count.get(chat_id, 0) + 1
+
+        # Track content promises — if the response teases sending media, mark for follow-through
+        response_lower = response.lower()
+        if any(trigger in response_lower for trigger in CONTENT_PROMISE_TRIGGERS):
+            _content_promise_pending[chat_id] = time.time()
+            main_logger.debug(f"[{request_id}] Content promise detected for {chat_id}")
 
         # --- POST-RESPONSE ADD-ONS ---
         # Only ONE add-on fires per turn to prevent message stacking.
@@ -8838,6 +8883,22 @@ async def main():
                         main_logger.warning(f"[CATCHUP] Failed to seed context for {chat_id}: {e}")
 
                 user_message = latest_msg.text
+
+                # Check if the missed message is a video/image request — handle directly
+                if is_video_request(user_message):
+                    sent = await send_video_to_chat(chat_id, client)
+                    if sent:
+                        main_logger.info(f"[CATCHUP] Sent video to {display_name} ({chat_id}) (video request)")
+                        replied_count += 1
+                        continue
+                if is_image_request(user_message) and image_library:
+                    category = gate_image_category(chat_id, get_image_category(user_message))
+                    event_proxy = type('obj', (object,), {'chat_id': chat_id, 'respond': lambda self, msg, **kw: client.send_message(chat_id, msg, **kw)})()
+                    sent = await send_library_image(event_proxy, chat_id, category)
+                    if sent:
+                        main_logger.info(f"[CATCHUP] Sent library image to {display_name} ({chat_id}) (image request)")
+                        replied_count += 1
+                        continue
 
                 # Generate AI response through normal pipeline
                 loop = asyncio.get_running_loop()
