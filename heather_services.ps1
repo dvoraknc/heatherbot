@@ -63,7 +63,7 @@ $Config = @{
 
     # llama-server (llama.cpp)
     LlamaServerExe = "C:\llama-cpp\llama-server.exe"
-    LlamaServerModel = "C:\Models\your-model-file.gguf"
+    LlamaServerModel = "C:\Models\Cydonia-24B-v4.3\Cydonia-24B-v4.3-Q6_K.gguf"
     LlamaServerGPULayers = 99
     LlamaServerContext = 32768
 
@@ -81,7 +81,7 @@ $Config = @{
     BotMonitorPort = 8888
     
     # NEW: Personality YAML file
-    PersonalityFile = Join-Path $BaseDir "persona_example.yaml"
+    PersonalityFile = Join-Path $BaseDir "heather_personality.yaml"
     
     # NEW: Small Model Mode (for 12B models like SingularitySynth)
     # Set to $true when using smaller models that need condensed prompts
@@ -98,7 +98,7 @@ $Config = @{
     TTSPythonEnv = "C:\AI\coqui_tts\Scripts\python.exe"
     
     # Logs
-    LogDir = Join-Path $BaseDir "logs"
+    LogDir = "C:\AI\logs"
 }
 
 # Load config overrides from services.json if it exists

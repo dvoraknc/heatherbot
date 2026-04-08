@@ -384,6 +384,83 @@ def strip_unprompted_ai_self_id(text: str) -> str:
     return result.strip()
 
 
+def add_human_imperfections(text: str) -> str:
+    """Add subtle human-like imperfections to text.
+
+    ~12% chance per response of adding a minor "mistake" that makes
+    the text feel more like real human texting. Only one imperfection
+    per response to avoid looking intentionally sloppy.
+    """
+    import random
+    if random.random() > 0.12 or len(text) < 20:
+        return text
+
+    imperfection = random.choice([
+        "typo",
+        "abbreviation",
+        "lowercase_start",
+        "double_emoji",
+        "filler",
+    ])
+
+    if imperfection == "typo":
+        # Common casual typos
+        typo_map = {
+            "that's": "thats",
+            "don't": "dont",
+            "you're": "ur",
+            "because": "cuz",
+            "though": "tho",
+            "thought": "thot",
+            "right": "rite",
+            "tonight": "tonite",
+            "about": "abt",
+            "probably": "prolly",
+        }
+        for correct, typo in typo_map.items():
+            if correct in text.lower():
+                # Only replace first occurrence, case-insensitive
+                import re
+                text = re.sub(re.escape(correct), typo, text, count=1, flags=re.IGNORECASE)
+                break
+
+    elif imperfection == "abbreviation":
+        abbrev_map = {
+            "to be honest": "tbh",
+            "in my opinion": "imo",
+            "not going to lie": "ngl",
+            "I don't know": "idk",
+            "by the way": "btw",
+            "oh my god": "omg",
+        }
+        for full, short in abbrev_map.items():
+            if full.lower() in text.lower():
+                import re
+                text = re.sub(re.escape(full), short, text, count=1, flags=re.IGNORECASE)
+                break
+
+    elif imperfection == "lowercase_start":
+        if text and text[0].isupper() and not text.startswith("I ") and not text.startswith("I'"):
+            text = text[0].lower() + text[1:]
+
+    elif imperfection == "double_emoji":
+        # Add an extra emoji at the end
+        extras = ["😂", "💀", "🔥", "😏", "💋", "😈", "😅"]
+        if text and text[-1] in "😂😏😈🔥💋😘":
+            text += random.choice(extras)
+
+    elif imperfection == "filler":
+        # Add a filler word at a natural break
+        fillers = ["lol", "haha", "omg", "ngl", "tbh"]
+        sentences = text.split(". ")
+        if len(sentences) >= 2:
+            insert_at = random.randint(0, len(sentences) - 2)
+            sentences[insert_at] = sentences[insert_at] + " " + random.choice(fillers)
+            text = ". ".join(sentences)
+
+    return text
+
+
 def postprocess_response(text: str) -> str:
     """Run all stateless post-processing stages on an LLM response.
 
@@ -398,8 +475,7 @@ def postprocess_response(text: str) -> str:
     text = strip_bracketed_metadata(text)
     text = fix_glm_sorta_artifact(text)
     text = strip_ai_denial_claims(text)
-    # strip_human_life_claims removed — with AI disclosure in place,
-    # character-flavor like "making coffee" or "just got home" is fine
     text = strip_unprompted_ai_self_id(text)
     text = strip_quote_wrapping(text)
+    text = add_human_imperfections(text)
     return text.strip()
