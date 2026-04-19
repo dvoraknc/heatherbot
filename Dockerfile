@@ -33,9 +33,9 @@ COPY persona_example.yaml .
 RUN mkdir -p /app/logs /app/user_profiles /app/images_db /app/videos \
     && chown -R kelly:kelly /app
 
-# Health check — confirms bot process is alive
-HEALTHCHECK --interval=60s --timeout=10s --start-period=30s --retries=3 \
-    CMD python -c "import os, sys; sys.exit(0 if os.path.exists('/app/logs/kelly_bot.log') else 1)"
+# Health check — HTTP to monitoring dashboard (matches ECS task definition)
+HEALTHCHECK --interval=60s --timeout=10s --start-period=60s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8888/health', timeout=8)" || exit 1
 
 USER kelly
 
