@@ -68,3 +68,18 @@ Heather.jpg
 *.gguf
 *.bin
 *.safetensors
+
+# ─── AWS / Terraform ─────────────────────────────────────────────────────────
+# NEVER commit these — they contain real secrets or account-specific data
+infrastructure/terraform/terraform.tfvars
+infrastructure/terraform/.terraform/
+infrastructure/terraform/.terraform.lock.hcl
+infrastructure/terraform/tfplan
+infrastructure/terraform/*.tfstate
+infrastructure/terraform/*.tfstate.backup
+infrastructure/terraform/crash.log
+
+# AWS credentials (should be in ~/.aws — never in repo)
+.aws/
+credentials
+

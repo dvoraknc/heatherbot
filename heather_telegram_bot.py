@@ -5607,18 +5607,28 @@ def compute_tip_tier(total_stars: int) -> int:
     return 0  # never tipped
 
 def get_access_tier(chat_id: int) -> str:
-    """Returns 'VIP', 'FAN', or 'FREE' based on total Stars spent.
-    TRANSPARENCY PIVOT (2026-04-06): Everyone gets VIP for free during trial period.
-    Full experience, zero guardrails, no paywalls. Monetization paused."""
-    return "VIP"
-    # Original tier logic — restore when re-enabling monetization:
-    # ts = get_tipper_status(chat_id)
-    # total = ts.get('total_stars', 0)
-    # if total >= ACCESS_TIER_VIP_THRESHOLD:
-    #     return "VIP"
-    # elif total >= ACCESS_TIER_FAN_THRESHOLD:
-    #     return "FAN"
-    # return "FREE"
+    """Returns 'VIP', 'FAN', or 'FREE' based on total Telegram Stars spent.
+
+    Monetization is controlled by the ENABLE_MONETIZATION env variable:
+      - ENABLE_MONETIZATION=true  → real tier gating (default for production)
+      - ENABLE_MONETIZATION=false → everyone gets VIP free (trial / development)
+
+    Tier thresholds (Stars):
+      FREE : 0 stars         — tease only, tribute prompt shown
+      FAN  : ≥50 stars       — explicit unlocked, memory enabled
+      VIP  : ≥200 stars      — zero guardrails, highest warmth tier
+    """
+    # Allow bypassing paywall for local dev / trial mode
+    if os.getenv("ENABLE_MONETIZATION", "true").lower() == "false":
+        return "VIP"
+
+    ts = get_tipper_status(chat_id)
+    total = ts.get('total_stars', 0)
+    if total >= ACCESS_TIER_VIP_THRESHOLD:
+        return "VIP"
+    elif total >= ACCESS_TIER_FAN_THRESHOLD:
+        return "FAN"
+    return "FREE"
 
 def record_tip(chat_id: int, stars: int, tipper_name: str = None):
     """Record a tip and update tier."""
@@ -9541,6 +9551,51 @@ async def handle_text_message(event):
             return
     else:
         main_logger.info(f"[REDTEAM][{request_id}] Bypassed: check_non_english_message")
+
+    # ── FINDOM GATE — enforce tribute before real engagement ──
+    # When ENABLE_MONETIZATION=true AND BOT_PERSONA=kelly, FREE-tier users
+    # get only the tribute prompt — no real conversation until they pay.
+    _is_findom_persona = os.getenv("BOT_PERSONA", "").lower() in ("kelly", "findom")
+    _monetization_on   = os.getenv("ENABLE_MONETIZATION", "true").lower() == "true"
+    if _is_findom_persona and _monetization_on and get_access_tier(chat_id) == "FREE":
+        _free_profile = user_memory.load_profile(chat_id)
+        _findom_pre_tribute_responses = [
+            "Hey. You know how this works. Tribute first — 50 stars opens the door. Tap the link.",
+            "So you found me. Good. I'll keep this simple: 50 stars gets you my time. Link below.",
+            "I don't do free previews. You want my attention, you earn it. 50 stars.",
+            "Reddit sent you? Then you already know — I don't do freebies. Tribute opens the door.",
+            "You came here for a reason. The reason costs 50 stars. Make it happen.",
+        ]
+        _tribute_pending_count = _free_profile.get("findom_gate_shown", 0)
+        if _tribute_pending_count == 0:
+            # First contact — send gate message + invoice
+            _gate_msg = random.choice(_findom_pre_tribute_responses)
+            await event.respond(_gate_msg)
+            store_message(chat_id, "Kelly", _gate_msg)
+            if chat_id not in conversations:
+                conversations[chat_id] = deque()
+            conversations[chat_id].append({"role": "assistant", "content": _gate_msg})
+            _free_profile["findom_gate_shown"] = 1
+            user_memory.save_profile(chat_id, force=True)
+            if PAYMENT_BOT_TOKEN:
+                await send_stars_invoice(chat_id, ACCESS_TIER_FAN_THRESHOLD)
+            main_logger.info(f"[FINDOM_GATE] First gate shown to {display_name} ({chat_id})")
+        elif _tribute_pending_count < 3:
+            # 2nd or 3rd attempt — brief reminder, no new LLM call
+            _remind = random.choice([
+                "Still here. 50 stars. Link above.",
+                "The door's still there. Tap the link when you're ready.",
+                "No tribute, no access. Simple as that.",
+            ])
+            await event.respond(_remind)
+            store_message(chat_id, "Kelly", _remind)
+            _free_profile["findom_gate_shown"] = _tribute_pending_count + 1
+            user_memory.save_profile(chat_id, force=True)
+            main_logger.info(f"[FINDOM_GATE] Reminder #{_tribute_pending_count} to {display_name} ({chat_id})")
+        else:
+            # 4th+ attempt — go silent (no reply, no LLM call, no engagement)
+            main_logger.info(f"[FINDOM_GATE] Silent ignore for {display_name} ({chat_id}) (shown {_tribute_pending_count}x)")
+        return  # STOP — FREE users never pass the gate in findom persona mode
 
     # First-message welcome — one-time per user, fires before their first reply
     # NOTE: No AI disclosure here — only disclose if user directly asks
