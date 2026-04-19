@@ -30,14 +30,14 @@ terraform {
     }
   }
 
-  # Remote state — keeps tf state safe in S3
-  # Uncomment after running bootstrap.sh which creates the bucket
-  # backend "s3" {
-  #   bucket  = "kellyfindombot-tfstate"
-  #   key     = "prod/terraform.tfstate"
-  #   region  = "us-east-1"
-  #   encrypt = true
-  # }
+  # Remote state — bucket is passed via -backend-config="bucket=..." at init time
+  # Run bootstrap.sh (local) or the terraform.yml GitHub Actions workflow to init.
+  backend "s3" {
+    key     = "prod/terraform.tfstate"
+    region  = "us-east-1"
+    encrypt = true
+    # bucket = injected via -backend-config flag
+  }
 }
 
 provider "aws" {
@@ -698,4 +698,86 @@ resource "aws_sns_topic_subscription" "alerts_email" {
   topic_arn = aws_sns_topic.alerts.arn
   protocol  = "email"
   endpoint  = var.alert_email
+}
+
+# =============================================================================
+# GITHUB ACTIONS — OIDC PROVIDER & DEPLOY ROLE
+# =============================================================================
+
+resource "aws_iam_openid_connect_provider" "github_actions" {
+  url = "https://token.actions.githubusercontent.com"
+
+  client_id_list = ["sts.amazonaws.com"]
+
+  # GitHub's OIDC CA thumbprint — verified 2024-01.
+  # Note: AWS validates GitHub OIDC tokens server-side; this thumbprint is a
+  # belt-and-suspenders check. Update if GitHub rotates their OIDC CA.
+  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
+}
+
+resource "aws_iam_role" "github_actions" {
+  name        = "kelly-github-actions"
+  description = "Assumed by GitHub Actions via OIDC to build and deploy the bot"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Federated = aws_iam_openid_connect_provider.github_actions.arn
+      }
+      Action = "sts:AssumeRoleWithWebIdentity"
+      Condition = {
+        StringEquals = {
+          "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+          # Only the main branch can assume this role — prevents deployments from forks/PRs
+          "token.actions.githubusercontent.com:sub" = "repo:ranoli90/KellyFindomBot:ref:refs/heads/main"
+        }
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "github_actions" {
+  name = "kelly-github-actions-deploy"
+  role = aws_iam_role.github_actions.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ECRAuth"
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
+        Resource = "*"
+      },
+      {
+        Sid    = "ECRPush"
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload",
+          "ecr:PutImage"
+        ]
+        Resource = [aws_ecr_repository.bot.arn]
+      },
+      {
+        Sid    = "ECSUpdate"
+        Effect = "Allow"
+        Action = [
+          "ecs:UpdateService",
+          "ecs:DescribeServices",
+          "ecs:DescribeTaskDefinition"
+        ]
+        Resource = [
+          aws_ecs_cluster.main.arn,
+          "arn:aws:ecs:${local.region}:${local.account_id}:service/${aws_ecs_cluster.main.name}/${aws_ecs_service.bot.name}"
+        ]
+      }
+    ]
+  })
 }

@@ -17,7 +17,6 @@ on:
         options: [prod, staging]
 
 permissions:
-  id-token: write   # OIDC for keyless AWS auth
   contents: read
 
 env:
@@ -87,10 +86,11 @@ for f in ['kelly_persona.yaml', 'persona_example.yaml', 'heather_kink_personas.y
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (OIDC)
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/kelly-github-actions
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to ECR
@@ -118,10 +118,11 @@ for f in ['kelly_persona.yaml', 'persona_example.yaml', 'heather_kink_personas.y
     needs: build-push
     environment: ${{ github.event.inputs.environment || 'prod' }}
     steps:
-      - name: Configure AWS credentials (OIDC)
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/kelly-github-actions
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Force new ECS deployment

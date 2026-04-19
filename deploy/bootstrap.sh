@@ -165,7 +165,7 @@ info "Step 5: Running Terraform..."
 cd infrastructure/terraform
 
 # Enable remote state (uncomment backend after bucket exists)
-terraform init -upgrade
+terraform init -upgrade -backend-config="bucket=${TFSTATE_BUCKET}"
 terraform plan -out=tfplan -compact-warnings
 echo ""
 warn "Review the plan above. Press Enter to apply or Ctrl+C to abort."
