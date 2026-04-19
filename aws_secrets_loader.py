@@ -36,7 +36,7 @@ def load_from_secrets_manager() -> dict:
         response = client.get_secret_value(SecretId=SECRET_NAME)
         secret_str = response.get("SecretString", "{}")
         cfg = json.loads(secret_str)
-        logger.info(f"✓ AWS Secrets Manager loaded successfully ({SECRET_NAME})")
+        logger.info("✓ AWS Secrets Manager loaded successfully")
         return cfg
     except ImportError:
         logger.error("boto3 not installed — cannot load from Secrets Manager")
