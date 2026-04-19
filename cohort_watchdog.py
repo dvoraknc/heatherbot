@@ -22,11 +22,16 @@ sys.stdout.reconfigure(encoding='utf-8')
 # ---------------------------------------------------------------------------
 BOT_DIR = Path(r"C:\Users\groot\heather-bot")
 LOG_PATHS = [
+    BOT_DIR / "logs" / "kelly_bot.log",
     BOT_DIR / "logs" / "heather_bot.log",
+    Path(r"C:\AI\logs\kelly_bot.log"),
     Path(r"C:\AI\logs\heather_bot.log"),
 ]
 # Include rotated logs from C:\AI\logs (the primary log location)
 ROTATED_LOG_PATHS = [
+    Path(r"C:\AI\logs\kelly_bot.log.1"),
+    Path(r"C:\AI\logs\kelly_bot.log.2"),
+    Path(r"C:\AI\logs\kelly_bot.log.3"),
     Path(r"C:\AI\logs\heather_bot.log.1"),
     Path(r"C:\AI\logs\heather_bot.log.2"),
     Path(r"C:\AI\logs\heather_bot.log.3"),

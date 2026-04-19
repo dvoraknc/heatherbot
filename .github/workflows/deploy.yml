@@ -40,12 +40,12 @@ jobs:
           python-version: '3.11'
 
       - name: Install linting tools
-        run: pip install ruff pyflakes
+        run: pip install -r requirements.txt ruff
 
       - name: Lint bot code
         run: |
-          ruff check heather_telegram_bot.py user_memory.py postprocess.py aws_secrets_loader.py \
-            --select E,F,W --ignore E501,E402 || true
+          ruff check aws_secrets_loader.py kelly_telegram_bot.py postprocess.py telethon_test.py \
+            --select E,F,W --ignore E501,E402
 
       - name: Validate YAML personas
         run: python -c "
@@ -55,6 +55,9 @@ for f in ['kelly_persona.yaml', 'persona_example.yaml', 'heather_kink_personas.y
         yaml.safe_load(fh)
     print(f'OK: {f}')
 "
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -p "test_*.py" -v
 
   # ─── Security scan ────────────────────────────────────────────────────────
   security:

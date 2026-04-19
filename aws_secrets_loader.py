@@ -16,7 +16,6 @@ import os
 import sys
 import json
 import logging
-import subprocess
 
 logger = logging.getLogger("secrets_loader")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [SECRETS] %(message)s")
@@ -24,6 +23,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [SECRETS] %(message)
 SECRET_NAME = os.getenv("KELLY_SECRET_NAME", "kellyfindombot/prod/secrets")
 AWS_REGION  = os.getenv("AWS_REGION", "us-east-1")
 USE_AWS     = os.getenv("USE_AWS_SECRETS", "true").lower() == "true"
+S3_MEDIA_BUCKET = os.getenv("S3_MEDIA_BUCKET", "")
+S3_SESSION_KEY = os.getenv("S3_SESSION_KEY", "session/kelly_session.session")
+TELEGRAM_SESSION_FILE = os.getenv("TELEGRAM_SESSION_FILE", "kelly_session.session")
 
 
 def load_from_secrets_manager() -> dict:
@@ -57,6 +59,8 @@ def inject_env(secrets: dict):
         "TELEGRAM_API_ID":    secrets.get("telegram_api_id", ""),
         "TELEGRAM_API_HASH":  secrets.get("telegram_api_hash", ""),
         "ADMIN_USER_ID":      secrets.get("admin_user_id", ""),
+        "BOT_PERSONA":        secrets.get("bot_persona", os.getenv("BOT_PERSONA", "kelly")),
+        "ENABLE_MONETIZATION": secrets.get("enable_monetization", os.getenv("ENABLE_MONETIZATION", "true")),
         # Payment bot
         "PAYMENT_BOT_TOKEN":    secrets.get("payment_bot_token", ""),
         "PAYMENT_BOT_USERNAME": secrets.get("payment_bot_username", ""),
@@ -78,17 +82,48 @@ def inject_env(secrets: dict):
     logger.info("✓ Environment variables injected from secrets")
 
 
+def maybe_restore_session_from_s3():
+    """Restore Telethon session from S3 when running in AWS and session is missing."""
+    if os.path.exists(TELEGRAM_SESSION_FILE):
+        logger.info("✓ Telegram session file already present")
+        return
+
+    if not S3_MEDIA_BUCKET:
+        logger.warning("S3_MEDIA_BUCKET not set and no local session file found")
+        return
+
+    try:
+        import boto3
+        from botocore.exceptions import ClientError
+
+        logger.info(f"Downloading session from s3://{S3_MEDIA_BUCKET}/{S3_SESSION_KEY}")
+        s3 = boto3.client("s3", region_name=AWS_REGION)
+        s3.download_file(S3_MEDIA_BUCKET, S3_SESSION_KEY, TELEGRAM_SESSION_FILE)
+        logger.info(f"✓ Session restored to {TELEGRAM_SESSION_FILE}")
+    except ImportError:
+        logger.error("boto3 not installed — cannot restore session from S3")
+        sys.exit(1)
+    except ClientError as e:
+        code = e.response["Error"].get("Code", "Unknown")
+        logger.error(f"S3 session restore failed [{code}]: {e}")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"Failed to restore Telegram session from S3: {e}")
+        sys.exit(1)
+
+
 def main():
     bot_args = sys.argv[1:]  # everything after this script name
 
     if USE_AWS:
         secrets = load_from_secrets_manager()
         inject_env(secrets)
+        maybe_restore_session_from_s3()
     else:
         logger.info("USE_AWS_SECRETS=false — reading from environment / .env directly")
 
     # Exec the bot process (replaces this process — PID 1 in container)
-    cmd = [sys.executable, "heather_telegram_bot.py"] + bot_args
+    cmd = [sys.executable, "kelly_telegram_bot.py"] + bot_args
     logger.info(f"Launching bot: {' '.join(cmd)}")
     os.execv(sys.executable, cmd)
 

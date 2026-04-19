@@ -9,7 +9,7 @@ Internet (Telegram)
 AWS ECS Fargate (kelly-prod-cluster)
  └── kelly-bot container
       ├── aws_secrets_loader.py  (pulls secrets from Secrets Manager)
-      ├── heather_telegram_bot.py (bot engine)
+      ├── kelly_telegram_bot.py   (bot entrypoint)
       └── kelly_persona.yaml     (findom persona)
        │
        ├── AWS Secrets Manager  → all credentials (Telegram, ElevenLabs, etc.)
@@ -66,19 +66,19 @@ The bot needs to log in to Telegram once to create a session file:
 
 ```bash
 # On your local machine — DO NOT skip this step
-python heather_telegram_bot.py --personality kelly_persona.yaml --small-model
+python kelly_telegram_bot.py --personality kelly_persona.yaml --small-model
 
 # Enter your phone number and verification code when prompted.
-# This creates: heather_session.session
+# This creates: kelly_session.session
 
 # Upload session to S3 (so ECS can load it)
-aws s3 cp heather_session.session \
-  s3://kelly-prod-media-$(aws sts get-caller-identity --query Account --output text)/session/heather_session.session
+aws s3 cp kelly_session.session \
+  s3://kelly-prod-media-$(aws sts get-caller-identity --query Account --output text)/session/kelly_session.session
 ```
 
-> Note: You'll need to add S3 session loading to the container startup if using ECS.
-> For simplicity, many operators run the bot on a single EC2 instance or keep a
-> persistent ECS volume with the session file.
+> ECS startup now restores `kelly_session.session` from S3 automatically when
+> `S3_MEDIA_BUCKET` and `S3_SESSION_KEY` are set (default key:
+> `session/kelly_session.session`).
 
 ---
 
@@ -231,8 +231,8 @@ The Telethon session file cannot be created interactively inside ECS. You **must
 1. Create the session locally first (see Local Test Run in DEVELOPER_HANDOFF.md)
 2. Upload to S3:
    ```bash
-   aws s3 cp heather_session.session \
-     s3://kelly-prod-media-$(aws sts get-caller-identity --query Account --output text)/session/heather_session.session
+   aws s3 cp kelly_session.session \
+     s3://kelly-prod-media-$(aws sts get-caller-identity --query Account --output text)/session/kelly_session.session
    ```
 3. The ECS container startup downloads it from S3 on first boot
 

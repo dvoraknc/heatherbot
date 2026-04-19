@@ -25,7 +25,7 @@ Kelly is a Financial Dominatrix persona that:
 Internet (Telegram)
        │
        ▼
-Telethon Userbot  ←─── heather_telegram_bot.py (BOT_PERSONA=kelly)
+Telethon Userbot  ←─── kelly_telegram_bot.py (BOT_PERSONA=kelly)
   (real account)          │
        │                  ├── kelly_persona.yaml        (findom persona definition)
        │                  ├── user_memory.py             (per-user profile, kink scoring)
@@ -47,11 +47,15 @@ Telethon Userbot  ←─── heather_telegram_bot.py (BOT_PERSONA=kelly)
 
 **Production deployment:** AWS ECS Fargate with EFS (session + profiles), S3 (media), Secrets Manager (credentials), CloudWatch (logs + alarms). See [`DEVELOPER_HANDOFF.md`](DEVELOPER_HANDOFF.md) for the complete setup guide.
 
+**GitHub automation:**  
+- `CI` workflow runs lint + YAML validation + unit tests on PRs and main pushes.  
+- `Deploy KellyFindomBot to AWS` workflow builds/pushes to ECR and rolls ECS on `main`.
+
 ---
 
 ## Feature Status
 
-All features are implemented in `heather_telegram_bot.py` unless marked otherwise.
+All features are implemented in `heather_telegram_bot.py` (launched via `kelly_telegram_bot.py`) unless marked otherwise.
 
 | Feature | Status | Notes |
 |---------|--------|-------|
@@ -137,13 +141,13 @@ Any OpenAI-compatible endpoint works — LM Studio, Ollama (with OpenAI compat),
 
 ```bash
 # First run — prompts for phone number and verification code
-python heather_telegram_bot.py --personality kelly_persona.yaml --small-model --monitoring
+python kelly_telegram_bot.py --personality kelly_persona.yaml --small-model --monitoring
 
 # Subsequent runs — uses saved session
-python heather_telegram_bot.py --personality kelly_persona.yaml --small-model
+python kelly_telegram_bot.py --personality kelly_persona.yaml --small-model
 ```
 
-Session is saved as `heather_session.session`. Protect this file — it is your Telegram account credential.
+Session is saved as `kelly_session.session`. Protect this file — it is your Telegram account credential.
 
 ---
 
@@ -177,7 +181,7 @@ Send these in your own Saved Messages (or any chat while logged in as ADMIN_USER
 | `--tts-port` | 5001 | TTS service port |
 | `--log-dir` | `logs/` | Log directory |
 | `--debug` | off | Verbose logging |
-| `--session` | `heather_session` | Telethon session file name |
+| `--session` | `kelly_session` | Telethon session file name |
 
 ---
 
@@ -203,7 +207,8 @@ Send these in your own Saved Messages (or any chat while logged in as ADMIN_USER
 
 ```
 KellyFindomBot/
-├── heather_telegram_bot.py     # Main bot (~13K lines) — runs as Kelly when BOT_PERSONA=kelly
+├── kelly_telegram_bot.py       # Preferred entrypoint wrapper
+├── heather_telegram_bot.py     # Main bot engine (~13K lines)
 ├── kelly_persona.yaml          # Kelly persona definition (28yo NYC findom)
 ├── persona_example.yaml        # Template for custom personas
 ├── heather_kink_personas.yaml  # Adaptive kink persona overlays (17 types)

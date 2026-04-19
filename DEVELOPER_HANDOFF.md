@@ -27,7 +27,7 @@
 
 | Component | Where it runs | Notes |
 |-----------|--------------|-------|
-| Main bot (`heather_telegram_bot.py`) | AWS ECS Fargate | The core application |
+| Main bot (`kelly_telegram_bot.py`) | AWS ECS Fargate | The core application |
 | LLM backend (`llama-server`) | ECS Fargate or EC2 | GPU required if not using cloud API |
 | User profiles | AWS EFS | Persistent across container restarts |
 | Session file | AWS EFS + S3 | Telegram authentication credential |
@@ -161,7 +161,7 @@ curl http://localhost:1234/v1/models
 ### 4.3 Run the bot
 
 ```bash
-python heather_telegram_bot.py \
+python kelly_telegram_bot.py \
   --personality kelly_persona.yaml \
   --small-model \
   --monitoring
@@ -171,7 +171,7 @@ On first run:
 1. Bot asks for your phone number (the Telegram account number)
 2. Telegram sends a verification code to that account
 3. Enter the code
-4. Session file `heather_session.session` is created — **back this up**
+4. Session file `kelly_session.session` is created — **back this up**
 
 ### 4.4 Verify it works
 
@@ -277,7 +277,7 @@ Telegram Stars tribute requires a second bot (Bot API) that sends invoices and r
 
 ### 6.3 Run the payment bot
 
-The payment bot runs as a separate Python process. It uses the same codebase — there is a Bot API payment handler integrated into `heather_telegram_bot.py`. When `PAYMENT_BOT_TOKEN` is set, the main bot starts an internal Thread that handles payment events via the Bot API.
+The payment bot runs as a separate Python process. It uses the same codebase — there is a Bot API payment handler integrated into `kelly_telegram_bot.py`. When `PAYMENT_BOT_TOKEN` is set, the main bot starts an internal Thread that handles payment events via the Bot API.
 
 In production, you can run both in the same ECS task (they share the same Python process).
 
@@ -301,7 +301,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
 COPY . .
-CMD ["python", "heather_telegram_bot.py", "--personality", "kelly_persona.yaml", "--small-model", "--monitoring", "--log-dir", "/efs/logs"]
+CMD ["python", "kelly_telegram_bot.py", "--personality", "kelly_persona.yaml", "--small-model", "--monitoring", "--log-dir", "/efs/logs"]
 ```
 
 EFS is mounted at `/efs` in the container. All persistent data goes there:
@@ -315,8 +315,8 @@ The session file must be present in EFS before ECS can connect to Telegram. Uplo
 
 ```bash
 # First: copy session file to EFS mount or upload to S3
-aws s3 cp heather_session.session \
-  s3://kelly-prod-media-<account-id>/session/heather_session.session
+aws s3 cp kelly_session.session \
+  s3://kelly-prod-media-<account-id>/session/kelly_session.session
 
 # The container startup script (in bootstrap.sh) downloads it from S3 to EFS on first boot
 ```
@@ -351,13 +351,13 @@ Or push to `main` — GitHub Actions (`.github/workflows/`) handles auto-deploy.
 
 ## 8. Session File Management
 
-The Telegram session file (`heather_session.session`) is the authentication credential. Losing it requires re-authenticating, which means another SMS verification — annoying in production.
+The Telegram session file (`kelly_session.session`) is the authentication credential. Losing it requires re-authenticating, which means another SMS verification — annoying in production.
 
 ### Best practices
 
 1. **After any fresh authentication**, copy the session file to S3 immediately:
    ```bash
-   aws s3 cp heather_session.session s3://kelly-prod-media-<account-id>/session/
+   aws s3 cp kelly_session.session s3://kelly-prod-media-<account-id>/session/
    ```
 
 2. **Never delete the session file** without backing it up first.
@@ -367,14 +367,14 @@ The Telegram session file (`heather_session.session`) is the authentication cred
 4. **If session becomes invalid** (`AuthKeyUnregisteredError`):
    - The bot attempts to restore from backup
    - If backup is also invalid, manual re-auth is required
-   - Run locally: `python heather_telegram_bot.py --personality kelly_persona.yaml`
+   - Run locally: `python kelly_telegram_bot.py --personality kelly_persona.yaml`
    - Enter phone + code
    - Upload new session file to S3
 
 5. **Session backup automation** (add to cron if running on EC2):
    ```bash
    # Every hour, back up session if it changed
-   0 * * * * aws s3 cp /efs/session/heather_session.session s3://kelly-prod-media-<account-id>/session/heather_session.session.bak-$(date +%Y%m%d)
+   0 * * * * aws s3 cp /efs/session/kelly_session.session s3://kelly-prod-media-<account-id>/session/kelly_session.session.bak-$(date +%Y%m%d)
    ```
 
 ---

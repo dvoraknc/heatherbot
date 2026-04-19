@@ -25,10 +25,12 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 BOT_DIR = Path(r"C:\Users\groot\heather-bot")
 LOG_FILE_PRIMARY = Path(r"C:\AI\logs\heather_bot.log")
 LOG_FILE_FALLBACK = BOT_DIR / "logs" / "heather_bot.log"
+LOG_FILE_PRIMARY_KELLY = Path(r"C:\AI\logs\kelly_bot.log")
+LOG_FILE_FALLBACK_KELLY = BOT_DIR / "logs" / "kelly_bot.log"
 REPORTS_DIR = Path(r"C:\AI\logs\reports")
 CHANGES_LOG = Path(r"C:\AI\logs\auto_changes.log")
 CHANGES_NOTIFIED = Path(r"C:\AI\logs\auto_changes_notified.pos")  # tracks last notified line
-BOT_SCRIPT = BOT_DIR / "heather_telegram_bot.py"
+BOT_SCRIPT = BOT_DIR / "kelly_telegram_bot.py"
 
 # Load .env for bot token and admin ID
 _env = {}
@@ -91,7 +93,7 @@ def _read_log_lines(cutoff_str: str) -> list:
     """Read log lines from both primary and fallback log paths.
     Returns merged, deduplicated lines newer than cutoff_str."""
     lines = []
-    for log_path in [LOG_FILE_PRIMARY, LOG_FILE_FALLBACK]:
+    for log_path in [LOG_FILE_PRIMARY_KELLY, LOG_FILE_FALLBACK_KELLY, LOG_FILE_PRIMARY, LOG_FILE_FALLBACK]:
         if not log_path.exists():
             continue
         try:
@@ -110,7 +112,7 @@ def _read_log_lines(cutoff_str: str) -> list:
 
 
 def parse_log(hours: int) -> dict:
-    """Parse heather_bot.log for the given time window and return metrics."""
+    """Parse bot logs for the given time window and return metrics."""
     cutoff = datetime.now() - timedelta(hours=hours)
     cutoff_str = cutoff.strftime("%Y-%m-%d %H:%M")
 
@@ -632,7 +634,7 @@ def check_and_notify_changes():
         msg_parts.append("")
         msg_parts.append("<b>!! RESTART NEEDED !!</b>")
         msg_parts.append("Run: <code>taskkill /PID [bot_pid] /F</code>")
-        msg_parts.append("Then: <code>cd heather-bot &amp;&amp; python heather_telegram_bot.py --monitoring --small-model --personality heather_personality.yaml --log-dir C:\\AI\\logs</code>")
+        msg_parts.append("Then: <code>cd heather-bot &amp;&amp; python kelly_telegram_bot.py --monitoring --small-model --personality kelly_persona.yaml --log-dir C:\\AI\\logs</code>")
 
     send_telegram("\n".join(msg_parts))
     print(f"Notified admin of {len(new_lines)} new changes (restart={needs_restart})")

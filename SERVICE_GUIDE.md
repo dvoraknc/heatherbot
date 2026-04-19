@@ -14,7 +14,7 @@ llama-server \
 curl http://localhost:1234/v1/models
 
 # Run the bot
-python heather_telegram_bot.py \
+python kelly_telegram_bot.py \
   --personality kelly_persona.yaml \
   --small-model \
   --monitoring
@@ -55,7 +55,7 @@ aws ecs update-service \
 |           |                          |                       |
 |  +--------v--------------------------v-----------------+     |
 |  |               Telethon Userbot                      |     |
-|  |         (heather_telegram_bot.py)                   |     |
+|  |         (kelly_telegram_bot.py)                     |     |
 |  |         BOT_PERSONA=kelly                           |     |
 |  |         Monitor Dashboard: 8888                     |     |
 |  +---------------------------------------------------------+  |
@@ -107,7 +107,7 @@ All required variables are in `.env` (local dev) or AWS Secrets Manager (product
 The bot is self-contained. Start in this order:
 
 1. **LLM backend** (`llama-server` or compatible)  
-2. **Bot** (`python heather_telegram_bot.py ...`)  
+2. **Bot** (`python kelly_telegram_bot.py ...`)  
 3. Bot waits for first Telegram message — no background workers need pre-warming
 
 The re-engagement scanner starts automatically 5 minutes after bot startup.
@@ -120,10 +120,10 @@ The re-engagement scanner starts automatically 5 minutes after bot startup.
 
 ```bash
 # Default log location
-tail -f logs/heather_bot.log
+tail -f logs/kelly_bot.log
 
 # Or with --log-dir flag
-tail -f /your/log/path/heather_bot.log
+tail -f /your/log/path/kelly_bot.log
 ```
 
 ### AWS ECS
@@ -169,19 +169,19 @@ aws logs get-log-events \
 
 ### Session expired / auth error
 
-The bot saves session state to `heather_session.session`. If this file is corrupted or the auth key is revoked:
+The bot saves session state to `kelly_session.session`. If this file is corrupted or the auth key is revoked:
 
 ```bash
 # Delete old session and re-authenticate
-rm heather_session.session
-python heather_telegram_bot.py --personality kelly_persona.yaml --small-model
+rm kelly_session.session
+python kelly_telegram_bot.py --personality kelly_persona.yaml --small-model
 # Enter phone number and verification code when prompted
 ```
 
 In production (ECS), upload the new session file to S3:
 ```bash
-aws s3 cp heather_session.session \
-  s3://kelly-prod-media-<account-id>/session/heather_session.session
+aws s3 cp kelly_session.session \
+  s3://kelly-prod-media-<account-id>/session/kelly_session.session
 ```
 
 ### PeerFloodError in logs
@@ -268,11 +268,11 @@ aws efs describe-file-systems
 
 ### Session file
 
-**Critical** — back up `heather_session.session` after every fresh authentication.
+**Critical** — back up `kelly_session.session` after every fresh authentication.
 
 ```bash
 # Local backup
-cp heather_session.session heather_session.session.bak
+cp kelly_session.session kelly_session.session.bak
 
 # Production — already on EFS via S3 copy during setup
 ```

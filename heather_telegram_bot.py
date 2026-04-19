@@ -75,7 +75,7 @@ except ImportError:
     pass
 
 # Parse command-line arguments
-parser = argparse.ArgumentParser(description='Heather Telegram Userbot v3.0 - Telethon Edition')
+parser = argparse.ArgumentParser(description='Kelly Telegram Userbot v3.0 - Telethon Edition')
 parser.add_argument('--unfiltered', action='store_true', help='Run without content filters')
 parser.add_argument('--monitoring', action='store_true', help='Enable monitoring interface on port 8888')
 parser.add_argument('--debug', action='store_true', help='Enable debug logging')
@@ -85,7 +85,7 @@ parser.add_argument('--log-dir', type=str, default='logs', help='Log directory p
 parser.add_argument('--tts-port', type=int, default=5001, help='TTS service port (default: 5001)')
 parser.add_argument('--personality', type=str, default='persona_example.yaml', help='Personality YAML file path')
 parser.add_argument('--small-model', action='store_true', help='Use optimized prompt for 12B models')
-parser.add_argument('--session', type=str, default='heather_session', help='Telethon session file name')
+parser.add_argument('--session', type=str, default='kelly_session', help='Telethon session file name')
 args = parser.parse_args()
 SMALL_MODEL_MODE = args.small_model
 
@@ -138,7 +138,7 @@ def setup_logger(name: str, log_file: str, level=logging.INFO, max_bytes=5*1024*
     return logger
 
 # Create specialized loggers
-main_logger = setup_logger('heather_bot', 'heather_bot.log', logging.DEBUG if args.debug else logging.INFO)
+main_logger = setup_logger('kelly_bot', 'kelly_bot.log', logging.DEBUG if args.debug else logging.INFO)
 text_ai_logger = setup_logger('text_ai', 'text_ai.log')
 ollama_logger = setup_logger('ollama', 'ollama.log')
 comfyui_logger = setup_logger('comfyui', 'comfyui.log')
@@ -13027,7 +13027,7 @@ async def main():
                 continue  # Retry with restored session
             else:
                 main_logger.critical("[SESSION] EOFError: no valid backup — manual re-auth required! "
-                                     "Run interactively: python heather_telegram_bot.py (without --monitoring)")
+                                     "Run interactively: python kelly_telegram_bot.py (without --monitoring)")
                 log_error('SESSION', "EOFError: no valid backup, manual re-auth required")
                 break  # Exit — cannot recover without terminal
 

@@ -448,6 +448,10 @@ resource "aws_ecs_task_definition" "bot" {
       { name = "KELLY_SECRET_NAME", value = aws_secretsmanager_secret.bot_secrets.name },
       { name = "AWS_REGION", value = local.region },
       { name = "S3_MEDIA_BUCKET", value = aws_s3_bucket.media.id },
+      { name = "S3_SESSION_KEY", value = "session/kelly_session.session" },
+      { name = "TELEGRAM_SESSION_FILE", value = "kelly_session.session" },
+      { name = "BOT_PERSONA", value = "kelly" },
+      { name = "ENABLE_MONETIZATION", value = "true" },
       { name = "LOG_LEVEL", value = "INFO" },
     ]
 

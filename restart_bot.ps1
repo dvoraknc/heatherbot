@@ -107,7 +107,7 @@ if ($portCheck) {
 }
 
 # -- Phase 2.5: Clean up stale session journal --
-$journalFile = Join-Path $botDir 'heather_session.session-journal'
+$journalFile = Join-Path $botDir 'kelly_session.session-journal'
 if (Test-Path $journalFile) {
     Write-Host "Removing stale session journal..."
     try {
@@ -127,7 +127,7 @@ if (Test-Path $journalFile) {
 
 # -- Phase 3: Start new bot instance --
 Write-Host "Starting bot..."
-Start-Process -FilePath 'python' -ArgumentList 'heather_telegram_bot.py','--monitoring','--small-model' -WorkingDirectory $botDir -WindowStyle Hidden
+Start-Process -FilePath 'python' -ArgumentList 'kelly_telegram_bot.py','--monitoring','--small-model' -WorkingDirectory $botDir -WindowStyle Hidden
 
 # -- Phase 4: Poll for readiness instead of fixed sleep --
 $startElapsed = 0
