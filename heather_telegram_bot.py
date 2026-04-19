@@ -2552,7 +2552,6 @@ async def maybe_send_tip_hook(event, chat_id: int) -> bool:
     )
     hook_text = None
     try:
-        import requests as _req
         _hook_payload = {
             "model": TEXT_AI_MODEL,
             "messages": [{"role": "system", "content": _hook_system}] + _hook_history,
@@ -2563,7 +2562,7 @@ async def maybe_send_tip_hook(event, chat_id: int) -> bool:
             "frequency_penalty": 0.4,
             "presence_penalty": 0.3,
         }
-        _hook_resp = _req.post(TEXT_AI_ENDPOINT, headers=TEXT_AI_HEADERS, json=_hook_payload, timeout=15)
+        _hook_resp = requests.post(TEXT_AI_ENDPOINT, headers=TEXT_AI_HEADERS, json=_hook_payload, timeout=15)
         if _hook_resp.status_code == 200:
             hook_text = _hook_resp.json()["choices"][0]["message"]["content"].strip()
             text_ai_health.record_success()
@@ -10789,7 +10788,6 @@ async def handle_text_message(event):
 
         # Call AI for a real, human response
         try:
-            import requests as _req
             _ai_payload = {
                 "model": TEXT_AI_MODEL,
                 "messages": [{"role": "system", "content": _gate_system}] + _gate_history[-6:],
@@ -10800,7 +10798,7 @@ async def handle_text_message(event):
                 "frequency_penalty": 0.4,
                 "presence_penalty": 0.3,
             }
-            _ai_resp = _req.post(TEXT_AI_ENDPOINT, headers=TEXT_AI_HEADERS, json=_ai_payload, timeout=20)
+            _ai_resp = requests.post(TEXT_AI_ENDPOINT, headers=TEXT_AI_HEADERS, json=_ai_payload, timeout=20)
             if _ai_resp.status_code == 200:
                 _gate_msg = _ai_resp.json()["choices"][0]["message"]["content"].strip()
                 text_ai_health.record_success()
@@ -12895,7 +12893,6 @@ async def main():
 
         if KELLY_MODE:
             # Fix 17: For FREE subs (haven't tributed), reference the unfinished tribute frame
-            _candidate_tier = get_access_tier(candidate['chat_id']) if hasattr(candidate, 'get') else "FREE"
             try:
                 _candidate_tier = get_access_tier(candidate['chat_id'])
             except Exception:
