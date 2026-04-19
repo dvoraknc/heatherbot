@@ -274,6 +274,41 @@ def _empty_profile() -> dict:
         "first_seen": None,
         "last_seen": None,
         "last_session_date": None,
+        # ── Adaptive interaction style (Kelly mode) ──────────────────────
+        # Updated by track_interaction_style() as conversations unfold.
+        "style": {
+            # What Kelly tone resonates with this person?
+            # "dominant" = they love commands and authority
+            # "warm"     = they respond to genuine warmth and attention
+            # "playful"  = they engage most when she's witty and light
+            # "intense"  = they want psychological depth and control
+            "tone_pref": None,          # dominant|warm|playful|intense|None
+            # How long do they prefer responses?
+            # "short" = ≤30 words | "medium" = 30-80 | "long" = 80+
+            "length_pref": None,        # short|medium|long|None
+            # Do they engage more with questions or statements?
+            "responds_to_questions": 0, # int: total replies after a question
+            "responds_to_statements": 0,
+            # Topic engagement counters — what keeps them talking?
+            "engaged_topics": {},       # topic_label -> engagement count
+            # Psychological driver — what pulls them back?
+            # "control"   = wants to feel controlled/owned
+            # "approval"  = needs validation from Kelly
+            # "fantasy"   = wants the psychological escape/fantasy
+            # "addiction"  = compulsive return pattern
+            "driver": None,
+            # Message length they tend to send (tracks what they match)
+            "msg_length_avg": 0.0,
+            "msg_length_samples": 0,
+            # Emoji usage — do they use them?
+            "uses_emoji": False,
+            # Have they sent tribute? (quick cache)
+            "has_tributed": False,
+            # Number of tribute sends (retention metric)
+            "tribute_count": 0,
+            # Kelly's last tailored greeting for this user
+            "last_adaptation_key": None,
+        },
     }
 
 
@@ -1444,3 +1479,225 @@ def build_profile_prompt(chat_id: int, access_tier: str = "FREE") -> str:
         logger.info(f"[MEMORY] Injected callback prompt for {chat_id}")
 
     return prompt
+
+
+# ── Adaptive Interaction Style (Kelly Mode) ─────────────────────────────────
+# Learns what resonates with each individual sub as the conversation unfolds.
+# These signals feed into Kelly's system prompt so she automatically adapts.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Topics to track engagement on (simple keyword→label mapping)
+_STYLE_TOPIC_KEYWORDS: Dict[str, List[str]] = {
+    "power_dynamic":  ["serve", "obey", "worship", "kneel", "controlled", "owned", "yours", "command"],
+    "psychology":     ["psychology", "why do i", "feel compelled", "mindset", "deep", "understand"],
+    "praise_seeking": ["good boy", "please", "did i do", "am i", "worthy", "deserve"],
+    "humiliation":    ["pathetic", "loser", "worthless", "small cock", "weak", "embarrass"],
+    "financial_focus":["tribute", "send money", "pay you", "wallet", "how much", "afford"],
+    "connection":     ["i miss", "thinking of you", "felt real", "genuine", "actually like"],
+    "escape":         ["forget everything", "escape", "just be here", "switch off", "fantasy"],
+}
+
+# Long messages (>60 chars) after a question = question worked
+_QUESTION_MARKERS = ["?"]
+
+# Dominant-tone signals in user messages (they're responding positively to dominance)
+_DOMINANT_RESPONSE_SIGNALS = [
+    "yes miss", "yes ma'am", "yes kelly", "of course", "as you say",
+    "you're right", "i should", "i will", "whatever you want", "for you",
+    "i'll do it", "i obey", "please let me", "may i",
+]
+
+# Approval-seeking signals
+_APPROVAL_SIGNALS = [
+    "am i doing okay", "is that okay", "did i do good", "good enough",
+    "do you like", "are you happy", "please", "forgive me",
+    "i'm sorry", "i messed up", "disappointed you",
+]
+
+
+def track_interaction_style(chat_id: int, user_message: str, bot_reply_was_dominant: bool = False):
+    """Update adaptive style profile after each exchange.
+
+    Call once per user message (AFTER we know what kind of reply was sent).
+    bot_reply_was_dominant should be True if Kelly's reply was assertive/commanding.
+    """
+    profile = load_profile(chat_id)
+    style = profile.setdefault("style", {
+        "tone_pref": None, "length_pref": None,
+        "responds_to_questions": 0, "responds_to_statements": 0,
+        "engaged_topics": {}, "driver": None,
+        "msg_length_avg": 0.0, "msg_length_samples": 0,
+        "uses_emoji": False, "has_tributed": False, "tribute_count": 0,
+        "last_adaptation_key": None,
+    })
+
+    msg_lower = user_message.lower().strip()
+    msg_len = len(user_message)
+
+    # ── Message length tracking ──────────────────────────────────────
+    n = style.get("msg_length_samples", 0)
+    avg = style.get("msg_length_avg", 0.0)
+    # Running average (exponential moving average, α=0.2)
+    style["msg_length_avg"] = avg * 0.8 + msg_len * 0.2
+    style["msg_length_samples"] = min(n + 1, 200)
+
+    if msg_len >= 80:
+        new_pref = "long"
+    elif msg_len >= 30:
+        new_pref = "medium"
+    else:
+        new_pref = "short"
+    # Only record once we have enough data
+    if style["msg_length_samples"] >= 5:
+        style["length_pref"] = new_pref
+
+    # ── Emoji usage ──────────────────────────────────────────────────
+    if any(ord(c) > 127 for c in user_message):
+        style["uses_emoji"] = True
+
+    # ── Topic engagement ─────────────────────────────────────────────
+    engaged = style.setdefault("engaged_topics", {})
+    for topic, keywords in _STYLE_TOPIC_KEYWORDS.items():
+        if any(kw in msg_lower for kw in keywords):
+            engaged[topic] = engaged.get(topic, 0) + 1
+
+    # ── Tone preference signals ───────────────────────────────────────
+    tone_votes: Dict[str, int] = {"dominant": 0, "warm": 0, "playful": 0, "intense": 0}
+
+    if any(sig in msg_lower for sig in _DOMINANT_RESPONSE_SIGNALS):
+        tone_votes["dominant"] += 2
+    if any(sig in msg_lower for sig in _APPROVAL_SIGNALS):
+        tone_votes["dominant"] += 1  # approval-seekers love dominant tone
+        tone_votes["warm"] += 1
+    # Engaged, long thoughtful message after a dominant reply → dominant working
+    if bot_reply_was_dominant and msg_len > 60:
+        tone_votes["dominant"] += 1
+    # Laughter / playfulness signals
+    if any(w in msg_lower for w in ["lol", "haha", "😂", "🤣", "hehe", "lmao", "funny"]):
+        tone_votes["playful"] += 1
+    # Psychology / deep engagement
+    if any(w in msg_lower for w in ["psycholog", "why do i", "mindset", "deep", "understand me", "know me"]):
+        tone_votes["intense"] += 1
+    # Affection signals → warm tone resonating
+    if any(w in msg_lower for w in ["i like talking to you", "i enjoy this", "love this", "feel so good", "so comfortable"]):
+        tone_votes["warm"] += 2
+
+    current_tone = style.get("tone_pref")
+    # Vote for the winning tone, but don't flip without at least 3 signals to that tone
+    best_tone = max(tone_votes, key=tone_votes.get)
+    if tone_votes[best_tone] >= 2:
+        style["tone_pref"] = best_tone
+
+    # ── Psychological driver ──────────────────────────────────────────
+    engaged_topics = style.get("engaged_topics", {})
+    top_topics = sorted(engaged_topics.items(), key=lambda x: x[1], reverse=True)
+    if top_topics:
+        top_topic = top_topics[0][0]
+        driver_map = {
+            "power_dynamic": "control",
+            "praise_seeking": "approval",
+            "escape": "fantasy",
+            "psychology": "intense",
+            "connection": "warm",
+        }
+        if top_topic in driver_map and top_topics[0][1] >= 3:
+            style["driver"] = driver_map[top_topic]
+
+    profile["style"] = style
+    save_profile(chat_id)
+
+
+def get_kelly_adaptation(chat_id: int) -> str:
+    """Build a Kelly-specific personality adaptation injection from this user's style profile.
+
+    Returns a system prompt snippet that nudges Kelly to match what resonates
+    with this specific sub — tone, length, topics, psychological levers.
+    """
+    profile = load_profile(chat_id)
+    style = profile.get("style", {})
+    if not style:
+        return ""
+
+    total_msgs = profile.get("total_msgs", 0)
+    # Not enough data yet
+    if total_msgs < 4:
+        return ""
+
+    parts: List[str] = []
+
+    # ── Tone adaptation ───────────────────────────────────────────────
+    tone = style.get("tone_pref")
+    if tone == "dominant":
+        parts.append(
+            "This sub responds strongly to dominant authority. Be more commanding — use short, "
+            "declarative sentences. Tell him what to do, not what you'd like. "
+            "He's the type who opens up when he feels truly controlled."
+        )
+    elif tone == "warm":
+        parts.append(
+            "This sub responds to genuine warmth within the dynamic. Be dominant but let warmth "
+            "through — use his name, acknowledge what he shares, make him feel actually seen. "
+            "The warmth is the hook."
+        )
+    elif tone == "playful":
+        parts.append(
+            "This sub loves playful energy. Use wit and teasing — a raised eyebrow in text form. "
+            "He engages most when it feels like a game. Keep it light but still dominant."
+        )
+    elif tone == "intense":
+        parts.append(
+            "This sub craves psychological depth. Go deeper — ask probing questions, "
+            "reference the psychology of what's happening between you, make him feel understood "
+            "in ways nobody else has. He wants his mind engaged, not just his wallet."
+        )
+
+    # ── Length adaptation ─────────────────────────────────────────────
+    length = style.get("length_pref")
+    if length == "short":
+        parts.append("Match his energy — keep your replies concise and punchy. He responds best when you don't over-explain.")
+    elif length == "long":
+        parts.append("He's a reader — longer, richer responses work on him. Build up the scene, the feeling, the detail.")
+
+    # ── Top engaged topics ────────────────────────────────────────────
+    engaged = style.get("engaged_topics", {})
+    top = sorted(engaged.items(), key=lambda x: x[1], reverse=True)[:2]
+    topic_hints = {
+        "power_dynamic": "The power dynamic is clearly central for him — invoke it regularly.",
+        "psychology":    "He's drawn to the psychological dimension of findom. Engage that.",
+        "praise_seeking":"He craves your approval. Give it sparingly — it means more that way.",
+        "humiliation":   "He responds to controlled degradation. Use it deliberately.",
+        "financial_focus":"He thinks about money and tribute often — lean into that.",
+        "connection":    "He wants to feel genuinely connected to you, not just transactional.",
+        "escape":        "He comes here to escape something. Be his sanctuary and his obsession.",
+    }
+    for topic, _ in top:
+        if topic in topic_hints and engaged.get(topic, 0) >= 3:
+            parts.append(topic_hints[topic])
+
+    # ── Psychological driver ──────────────────────────────────────────
+    driver = style.get("driver")
+    if driver == "control":
+        parts.append("His core need is to feel genuinely controlled. Make him feel like he has no choice but to please you.")
+    elif driver == "approval":
+        parts.append("He needs your approval more than anything. Withhold it deliberately — let him earn it.")
+    elif driver == "fantasy":
+        parts.append("He's here for the fantasy and escape. Be the fantasy — not a chatbot, not a transaction.")
+
+    # ── Returning tribute history ─────────────────────────────────────
+    tribute_count = style.get("tribute_count", 0)
+    if tribute_count >= 3:
+        parts.append(
+            f"He has tributed {tribute_count} times. He's a loyal sub. Acknowledge that loyalty "
+            "occasionally — not gratitude, but recognition. He's proven himself."
+        )
+    elif tribute_count >= 1:
+        parts.append("He has tributed before. He knows the value you offer. Reinforce that subtly.")
+
+    if not parts:
+        return ""
+
+    return (
+        "\n\n[KELLY ADAPTATION — PERSONALIZED FOR THIS SUB]\n"
+        + "\n".join(f"• {p}" for p in parts)
+        + "\n"
+    )
