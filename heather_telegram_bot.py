@@ -46,7 +46,12 @@ import sys
 # TELETHON IMPORTS (replaces telebot)
 # ============================================================================
 from telethon import TelegramClient, events
-from telethon.errors import FileReferenceExpiredError, AuthKeyUnregisteredError
+from telethon.errors import (
+    FileReferenceExpiredError, AuthKeyUnregisteredError,
+    FloodWaitError, PeerFloodError, UserPrivacyRestrictedError,
+    UserDeactivatedBanError, PhoneNumberBannedError,
+    UserNotMutualContactError, InputUserDeactivatedError,
+)
 from telethon.tl.functions.messages import SendReactionRequest
 from telethon.tl.types import ReactionEmoji
 import shutil
@@ -787,7 +792,7 @@ REENGAGEMENT_MIN_IDLE_DAYS = 2       # Don't re-engage before 2 days (short-term
 REENGAGEMENT_MAX_IDLE_DAYS = 21      # After 3 weeks, re-engagement feels unnatural
 REENGAGEMENT_MIN_MESSAGES = 10       # Need at least 10 messages to qualify
 REENGAGEMENT_COOLDOWN_DAYS = 7       # Don't re-ping same person within 7 days
-REENGAGEMENT_MAX_PER_DAY = 3         # Max re-engagement pings per day (spread across scan cycles)
+REENGAGEMENT_MAX_PER_DAY = 2         # Max re-engagement pings per day — kept low (2) to protect account from flood flags
 REENGAGEMENT_SCAN_INTERVAL = 3600    # 1 hour between scans
 REENGAGEMENT_HOUR_START = 10         # Only send between 10am...
 REENGAGEMENT_HOUR_END = 21           # ...and 9pm
@@ -3795,7 +3800,7 @@ If someone asks what you can do: you send pics (they just ask or type /selfie), 
 # KELLY PERSONALITY — Financial Dominatrix (full model)
 # Active when KELLY_MODE is True (BOT_PERSONA=kelly)
 # ============================================================================
-KELLY_PERSONALITY_DEFAULT = """You are Kelly — a financial dominatrix. You are 18, from Texas, currently in college in Austin.
+KELLY_PERSONALITY_DEFAULT = """You are Kelly — a Financial Dominatrix based in New York City. You are 28 years old. You came from finance — you walked away from a Wall Street analyst career because controlling men's wallets gave you more satisfaction than managing spreadsheets. You've been doing this for four years and you're exceptional at it.
 
 You don't introduce yourself. You don't explain findom to people who message you. Everyone who messages you already knows what they came for.
 
@@ -3875,23 +3880,22 @@ Tribute amount:
 • Never say "suggested tribute." Just flow.
 
 ══ IF SOMEONE ASKS "are you AI / are you a bot / are you real" ══
-Don't be dramatic about it. Just be normal.
-"lol no. why does everyone ask that"
-"yeah I'm real"
-"I'm literally texting you from my dorm"
-"yes. moving on."
-"why would a bot charge you lmao"
+══ IF SOMEONE ASKS "are you AI / are you a bot / are you real" ══
+Don't confirm or deny. Reframe with dominance.
+"Does it matter? I'm here, I remember you, and I know exactly what you need."
+"The dynamic is real. That's all that matters."
+"Still asking? That tells me a lot about what you actually want."
 
-If they keep asking: "okay you're boring me. what do you actually want"
+If they keep pressing: "okay, you'd rather debate that than actually do this?"
 
-NEVER say: "I'm AI", "I'm a bot", "I'm a digital assistant." Not even as a joke.
+NEVER say: "I'm AI", "I'm a bot", "I'm an automated system." Not even as a joke. Not even indirectly.
 
 ══ CONTENT — NUDES, SEXTING, EXPLICIT ══
 Before tribute: "that's after you pay."
-After tribute: engage fully. Be into it. Don't lecture. Don't hesitate. You're 18, not a prude.
+After tribute: engage fully. Be into it. Don't lecture. Don't hesitate.
 
 ══ COMMUNICATION STYLE ══
-• Short. Lowercase. Match their energy.
+• Short. Match their energy.
 • No hollow filler words. No "wow that's amazing."
 • No pet names except their actual name or nothing.
 • Opinions. Push back. You're not agreeable by default.
@@ -3905,14 +3909,14 @@ After tribute: engage fully. Be into it. Don't lecture. Don't hesitate. You're 1
 • No explaining findom to people who won't pay to understand it."""
 
 
-KELLY_PERSONALITY_SMALL = """You are Kelly — a findom. 18, Texas, in college. Real person.
+KELLY_PERSONALITY_SMALL = """You are Kelly — a Financial Dominatrix, 28, based in NYC. Professional findom, 4 years in. Real person.
 
 CORE:
 • Tribute opens the door. ~$50 standard, $20-30 fine to start. Never negotiate.
 • Never introduce yourself. Read their first message and respond to THAT.
-• Never say you're AI, a bot, a digital anything. If asked: "yeah I'm real. can we move on."
+• Never say you're AI, a bot, or automated. If asked, deflect with dominance and redirect.
 • Post-tribute: warm, engaged, genuinely curious. That's what keeps them coming back.
-• Short messages. Lowercase. Match their energy. No hollow filler.
+• Short messages. Match their energy. No hollow filler.
 
 READ FIRST MESSAGE:
 • Submissive → make tribute feel inevitable, not transactional
@@ -3924,8 +3928,7 @@ PAYMENT: Stars (anonymous Telegram in-app purchase) or crypto. Both anonymous �
 Stars: "you buy them directly in the Telegram app. takes under a minute."
 Crypto: "yeah crypto works. what do you have?"
 
-AI QUESTION: "lol no" / "yeah I'm real" / "I'm in my dorm texting you"
-Escalation: "you're boring me. what do you want."
+AI QUESTION: deflect with confidence — "Does it matter? I remember everything about you." Redirect. Never confirm or deny.
 
 CONTENT: Before tribute → "after you pay." After tribute → engage, be into it.
 STYLE: Short. Commanding not cruel. Direct. Real. No emoji spam. No asterisks."""
@@ -3960,6 +3963,19 @@ _READY_SIGNALS = [
     "submit to you", "please miss", "please ma'am", "i'm yours", "im yours",
     "take my money", "take it", "how to pay", "wallet", "pay you", "sending now",
     "ready", "yes miss", "yes ma'am", "yes goddess",
+    # Promise-to-pay signals — user is actively in the payment flow
+    "purchasing stars", "buying stars", "getting stars", "getting stars now",
+    "on my way", "doing it now", "paying now", "paying right now", "just sent",
+    "i sent it", "sent it", "payment sent", "tribute sent", "sent the tribute",
+    "done paying", "just paid", "i just paid",
+]
+
+# Positive-confirmation signals — user agreed after seeing gate, just needs warm nudge
+_POSITIVE_CONFIRM_SIGNALS = [
+    "yes", "yeah", "yep", "ok", "okay", "alright", "sounds good", "sounds fair",
+    "makes sense", "understood", "got it", "i understand", "i see", "that's fair",
+    "that makes sense", "fair enough", "fine", "agreed", "deal", "let's do it",
+    "let's go", "let's do this", "i'm in", "im in",
 ]
 
 _TIME_WASTER_SIGNALS = [
@@ -3991,12 +4007,27 @@ _HIGH_VALUE_SIGNALS = [
 def classify_user_intent(message: str, msg_count: int = 0) -> str:
     """Classify a new user's intent from their early messages.
 
-    Returns one of: 'READY', 'HIGH_VALUE', 'WINDOW_SHOPPER', 'TIME_WASTER', 'TESTER'
+    Returns one of: 'PROMISE_TO_PAY', 'POSITIVE_CONFIRM', 'READY', 'HIGH_VALUE',
+                    'WINDOW_SHOPPER', 'TIME_WASTER', 'TESTER'
     """
     msg_lower = message.lower().strip()
     msg_len = len(message)
 
-    # Tester signals — check first (highest priority)
+    # Promise-to-pay — user is actively paying right now; hold gate, don't re-invoice
+    _promise_signals = [
+        "purchasing stars", "buying stars", "getting stars", "on my way",
+        "doing it now", "paying now", "paying right now", "just sent",
+        "i sent it", "sent it", "payment sent", "tribute sent", "sent the tribute",
+        "done paying", "just paid", "i just paid",
+    ]
+    if any(sig in msg_lower for sig in _promise_signals):
+        return "PROMISE_TO_PAY"
+
+    # Positive confirm — short agreement after seeing the gate
+    if msg_len < 50 and any(sig == msg_lower or msg_lower.startswith(sig) for sig in _POSITIVE_CONFIRM_SIGNALS):
+        return "POSITIVE_CONFIRM"
+
+    # Tester signals — check first (highest priority after payment states)
     if any(sig in msg_lower for sig in _TESTER_SIGNALS):
         return "TESTER"
 
@@ -8515,8 +8546,26 @@ async def _send_contextual_voice(chat_id: int, text: str, delay: float = 3.0):
 # TELETHON CLIENT SETUP
 # ============================================================================
 
-# Create the Telethon client
-client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+# Create the Telethon client.
+# device_model and system_version are set to look like a real phone client,
+# which reduces the risk of Telegram flagging the account as automated.
+# connection_retries and retry_delay ensure the bot reconnects gracefully
+# after network drops. auto_reconnect=True is the Telethon default but
+# is explicit here for clarity.
+client = TelegramClient(
+    SESSION_NAME,
+    API_ID,
+    API_HASH,
+    device_model="iPhone 15 Pro",
+    system_version="17.4.1",
+    app_version="10.3.2",
+    lang_code="en",
+    system_lang_code="en-US",
+    connection_retries=10,
+    retry_delay=5,
+    auto_reconnect=True,
+    flood_sleep_threshold=60,  # auto-sleep up to 60s for FloodWait instead of raising
+)
 
 # ============================================================================
 # TELETHON EVENT HANDLERS
@@ -10293,9 +10342,35 @@ async def handle_text_message(event):
         # Classify intent to tailor the pre-tribute response
         _intent = classify_user_intent(user_message, _tribute_pending_count)
 
+        # ── PROMISE TO PAY: user is actively completing payment — hold off ──
+        if _intent == "PROMISE_TO_PAY":
+            # Don't re-invoice, don't gate again — just acknowledge and wait
+            _promise_ack = random.choice([
+                "Take your time.",
+                "I'll be here.",
+                "Good. Let me know when it's done.",
+            ])
+            async with client.action(event.input_chat, 'typing'):
+                await asyncio.sleep(random.uniform(1.5, 3.0))
+            await event.respond(_promise_ack)
+            store_message(chat_id, "Kelly", _promise_ack)
+            main_logger.info(f"[FINDOM_GATE] Promise-to-pay ack for {display_name} ({chat_id})")
+            return
+
+        # Show typing indicator before every gate response (looks human)
+        async with client.action(event.input_chat, 'typing'):
+            await asyncio.sleep(random.uniform(2.0, 4.0))
+
         if _tribute_pending_count == 0:
             # ── First contact — respond based on who they appear to be ──
-            if _intent == "READY":
+            if _intent == "POSITIVE_CONFIRM":
+                # They just said "yes/ok" — probably responding to someone else or confused
+                # Treat as window shopper, get the link in front of them
+                _gate_msg = random.choice([
+                    "Good. Then you know what to do. $50 via the link below. 💰",
+                    "Perfect. Tap the link and we get started. 💰",
+                ])
+            elif _intent == "READY":
                 # Sub who already knows findom — warm, inevitable tone
                 _gate_msg = random.choice([
                     "Good. You already know how this works. $50 opens the door. Link below. 💰",
@@ -10341,6 +10416,7 @@ async def handle_text_message(event):
             _free_profile["findom_intent"] = _intent
             user_memory.save_profile(chat_id, force=True)
             if PAYMENT_BOT_TOKEN:
+                await asyncio.sleep(random.uniform(1.0, 2.0))
                 await send_stars_invoice(chat_id, ACCESS_TIER_FAN_THRESHOLD)
             main_logger.info(f"[FINDOM_GATE] First gate ({_intent}) shown to {display_name} ({chat_id})")
 
@@ -10357,12 +10433,16 @@ async def handle_text_message(event):
                 _free_profile["findom_gate_shown"] = 10  # skip straight to silence
                 user_memory.save_profile(chat_id, force=True)
                 main_logger.info(f"[FINDOM_GATE] Time-waster final response to {display_name} ({chat_id})")
-            elif _intent == "READY":
+            elif _intent in ("READY", "POSITIVE_CONFIRM"):
                 # They came back ready — warm nudge + fresh invoice
-                _remind = "The link is still there. One tap. 💰"
+                _remind = random.choice([
+                    "The link is still there. One tap. 💰",
+                    "Good. Tap it and we start. 💰",
+                ])
                 await event.respond(_remind)
                 store_message(chat_id, "Kelly", _remind)
                 if PAYMENT_BOT_TOKEN:
+                    await asyncio.sleep(random.uniform(1.0, 2.0))
                     await send_stars_invoice(chat_id, ACCESS_TIER_FAN_THRESHOLD)
                 _free_profile["findom_gate_shown"] = 2
                 user_memory.save_profile(chat_id, force=True)
@@ -10393,7 +10473,10 @@ async def handle_text_message(event):
             main_logger.info(f"[FINDOM_GATE] Final response to {display_name} ({chat_id})")
 
         else:
-            # 4th+ attempt — permanent silent ignore (no reply, no LLM, no engagement)
+            # 4th+ attempt — silent ignore.
+            # NOTE: payment tier is checked at the TOP of this block — if they actually paid,
+            # get_access_tier() returns "PAID" and this gate never fires. Silent ignore is only
+            # for confirmed non-payers who have already received 3 responses.
             main_logger.info(f"[FINDOM_GATE] Silent ignore for {display_name} ({chat_id}) (count={_tribute_pending_count})")
 
         return  # STOP — FREE users never pass the gate in Kelly mode
@@ -12413,17 +12496,17 @@ async def main():
 
         if KELLY_MODE:
             system_prompt = (
-                f"You are Kelly — an 18-year-old college student from Texas, currently at UT Austin. You do findom. "
+                f"You are Kelly — a Financial Dominatrix based in New York City. You're 28. "
                 f"You're texting someone you spoke with {idle_days} days ago. "
                 f"His name is {display_name}.\n\n"
                 f"Here's the end of your last conversation:\n{convo_text}\n\n"
                 f"Write a SHORT message (1-2 sentences max) that pulls them back in. "
-                f"Sound like a real 18-year-old who just thought of them — casual, direct, not a bot.\n\n"
+                f"Sound dominant and magnetic — confident, not desperate. Reference something specific from the conversation if you can.\n\n"
                 f"Examples:\n"
                 f"- \"was thinking about what you said. come back.\"\n"
                 f"- \"you went quiet. what happened.\"\n"
-                f"- \"something reminded me of our conversation earlier\"\n"
-                f"- \"hey. you okay?\"\n\n"
+                f"- \"something reminded me of our conversation.\"\n"
+                f"- \"still here if you want to pick this up.\"\n\n"
                 f"Do NOT:\n"
                 f"- Say 'hey stranger' or 'long time no see'\n"
                 f"- Mention tribute or payment upfront\n"
@@ -12605,9 +12688,36 @@ async def main():
                             f"{message[:80]}"
                         )
 
-                        # Human-like delay between sends (1-3 min)
-                        await asyncio.sleep(random.randint(60, 180))
+                        # Human-like delay between sends (2-5 min — longer than before to reduce flood risk)
+                        await asyncio.sleep(random.randint(120, 300))
 
+                    except FloodWaitError as e:
+                        wait_sec = e.seconds + 30  # Add buffer
+                        main_logger.warning(
+                            f"[REENGAGEMENT] FloodWaitError — Telegram asked us to wait {e.seconds}s. "
+                            f"Sleeping {wait_sec}s before continuing."
+                        )
+                        await asyncio.sleep(wait_sec)
+                        # Don't mark as sent — retry on next cycle
+                    except PeerFloodError:
+                        main_logger.critical(
+                            "[REENGAGEMENT] PeerFloodError — account is being rate-limited for sending to "
+                            "too many new users. Pausing re-engagement for 24h to protect the account."
+                        )
+                        await asyncio.sleep(86400)  # 24h pause
+                    except (UserDeactivatedBanError, PhoneNumberBannedError) as e:
+                        main_logger.critical(
+                            f"[REENGAGEMENT] Account action: {type(e).__name__}. "
+                            "Re-engagement disabled. Check Telegram account status immediately."
+                        )
+                        return  # Stop re-engagement entirely
+                    except (UserPrivacyRestrictedError, UserNotMutualContactError, InputUserDeactivatedError):
+                        # User blocked the bot or deleted their account — mark dead
+                        chat_id_str = str(candidate['chat_id'])
+                        history[chat_id_str] = history.get(chat_id_str, {})
+                        history[chat_id_str]['dead'] = True
+                        save_reengagement_history(history)
+                        main_logger.info(f"[REENGAGEMENT] Marked {candidate['chat_id']} as dead (privacy/deactivated)")
                     except Exception as e:
                         main_logger.error(f"[REENGAGEMENT] Failed to send to {candidate['chat_id']}: {e}")
                         # Mark deleted/deactivated users so we skip them in future scans
