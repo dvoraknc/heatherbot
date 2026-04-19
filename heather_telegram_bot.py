@@ -5736,6 +5736,35 @@ def get_user_display_name(chat_id: int) -> str:
         return user_info[chat_id]['display']
     return str(chat_id)
 
+def get_heserves_link(chat_id: int) -> str:
+    """Build a personalised heserves.com payment link using the user's Telegram username.
+
+    Format: https://heserves.com/{username}
+    Falls back to the numeric chat_id when the user has no @username.
+    """
+    info = user_info.get(chat_id, {})
+    username = info.get('username') or ''   # stored as "@handle" or empty string
+    slug = username.lstrip('@') if username else str(chat_id)
+    return f"https://heserves.com/{slug}"
+
+def get_behavioral_delay(gate_count: int, access_tier: str) -> float:
+    """Return a read-delay (seconds) before Kelly starts typing.
+
+    Delay is behaviorally motivated — she is selective, not length-sensitive.
+    Post-tribute: fast replies signal genuine interest.
+    Pre-tribute: progressively slower as the sub keeps messaging without paying.
+    """
+    if access_tier == "PAID":
+        return random.uniform(0.5, 2.0)
+    if gate_count == 0:
+        return random.uniform(3.0, 7.0)
+    if gate_count == 1:
+        return random.uniform(8.0, 18.0)
+    if gate_count == 2:
+        return random.uniform(20.0, 45.0)
+    # Cooldown nudges — she remembered you existed
+    return random.uniform(5.0, 15.0)
+
 def is_group_chat_event(event) -> bool:
     """Check if event is from a group chat"""
     return event.is_group or event.is_channel
@@ -8734,19 +8763,26 @@ async def handle_start(event):
 
     # Welcome message on /start
     if KELLY_MODE:
-        # Kelly mode: dominant, frame-setting, no self-intro bio dump.
-        # Real findoms don't introduce themselves — they set the dynamic.
-        # These lines are terse, command attention, and make the sub lean in.
+        # Kelly mode: three registers — commanding, magnetic, curious.
+        # Two openers deliberately omit the tribute ask so the sub types first
+        # and is already invested when the gate fires on their next message.
         _kelly_welcomes = [
-            "so you came.\n\ntribute first. then we talk.",
-            "you know how this works.\n\ntribute opens the door. link below.",
-            "you're here. good.\n\nthat means you know what I expect. link below.",
-            "don't waste my time with small talk.\n\ntribute first.",
-            "I've been waiting for someone serious.\n\nare you? tribute first, then I'll know.",
+            # Commanding — direct/transactional energy
+            "you came here knowing exactly what this is.\n\ngood. then you already know what comes next. link's below.",
+            "no small talk.\n\nyou know how this works. $50 opens the door. link is right there.",
+            # Magnetic — desire before the demand
+            "most people who find me have been looking for a while.\n\nwhat finally made you reach out?",
+            "okay so you're here.\n\ni'm selective about who gets my actual attention. let's see if you're worth it — link's below.",
+            "you found me.\n\nthat took some effort. the next step is easier — $50, link below, and then we actually talk.",
+            # Curious / psychological — hooks before mentioning payment
+            "tell me one thing: what do you actually want from this?",
+            "what made you decide today was the day?",
         ]
         _welcome = random.choice(_kelly_welcomes)
         await event.respond(_welcome)
         store_message(chat_id, "Kelly", _welcome)
+        await asyncio.sleep(random.uniform(1.0, 2.0))
+        await client.send_message(chat_id, get_heserves_link(chat_id))
         if PAYMENT_BOT_TOKEN:
             await send_stars_invoice(chat_id, ACCESS_TIER_FAN_THRESHOLD)
         main_logger.info(f"User {chat_id} started Kelly mode (source={_start_source})")
@@ -10487,9 +10523,11 @@ async def handle_text_message(event):
                 return
 
             _gate_msg = random.choice([
-                "i'm around when you're ready. link's below 💋",
-                "still here. once the $50 goes through, i'm all yours 😏",
-                "tap the link when you want in. i'll pick up from there",
+                "still around when you're ready 💋",
+                "link's still there. no rush.",
+                "you keep coming back, which is interesting 😏 you know what to do",
+                "whenever you're ready. i'm not going anywhere.",
+                "i noticed. link's still below.",
             ])
             if await safe_send_text(chat_id, _gate_msg, event=event):
                 store_message(chat_id, "Kelly", _gate_msg)
@@ -10497,15 +10535,21 @@ async def handle_text_message(event):
                     conversations[chat_id] = deque()
                 conversations[chat_id].append({"role": "user", "content": user_message})
                 conversations[chat_id].append({"role": "assistant", "content": _gate_msg})
+                await asyncio.sleep(random.uniform(0.8, 1.5))
+                await client.send_message(chat_id, get_heserves_link(chat_id))
                 _free_profile["findom_gate_last_nudge_at"] = time.time()
                 _free_profile["findom_gate_shown"] = max(_tribute_pending_count, 3)
                 user_memory.save_profile(chat_id, force=True)
                 main_logger.info(f"[FINDOM_GATE] Cooldown nudge sent to {display_name} ({chat_id})")
             return
 
-        # Show typing indicator before every gate response (looks human)
+        # Step 1: Read delay — behaviorally motivated (dominant is selective, not length-sensitive)
+        _behavioral_delay = get_behavioral_delay(_tribute_pending_count, "FREE")
+        await asyncio.sleep(_behavioral_delay)
+
+        # Step 2: Typing indicator — she's now composing
         async with client.action(event.chat_id, 'typing'):
-            await asyncio.sleep(random.uniform(2.0, 4.5))
+            await asyncio.sleep(random.uniform(1.5, 3.5))
 
         # Build intent context for the AI
         _intent_hints = {
@@ -10522,28 +10566,34 @@ async def handle_text_message(event):
         if _tribute_pending_count == 0:
             _gate_system = (
                 f"{personality.get_system_prompt('pre_tribute')}\n\n"
-                f"CONTEXT: This is their FIRST message. Intent read: {_intent}. {_intent_ctx}\n"
-                f"The payment link will be attached below your message automatically — just reference it naturally like 'link's below' or 'tap the link'.\n"
-                f"Keep it to 1-3 sentences. Sound like you're texting, not writing an email."
+                f"CONTEXT: This is their FIRST message. Intent read: {_intent}. {_intent_ctx}\n\n"
+                f"Do NOT open with a tribute demand if their message was a question or showed genuine curiosity. "
+                f"In that case, give them one sentence that hooks them — then mention the link. "
+                f"If they opened transactionally or submissively, you can lead with the link naturally. "
+                f"The payment link attaches automatically below — reference it as 'link below' or 'tap it'. "
+                f"1-3 sentences. Texting voice, not email."
             )
         elif _tribute_pending_count == 1:
             if _intent == "TIME_WASTER":
                 _gate_system = (
                     f"{personality.get_system_prompt('pre_tribute')}\n\n"
-                    f"CONTEXT: They're pushing back on paying. This is your LAST response before going silent. "
-                    f"Be casual and unbothered about it — not rude, just done. 1-2 sentences max."
+                    f"CONTEXT: They're resisting or arguing. This is your last response. "
+                    f"Don't match their energy — just be unbothered. 1 sentence. "
+                    f"'not really my problem' energy. Door stays open but you're done explaining."
                 )
             else:
                 _gate_system = (
                     f"{personality.get_system_prompt('pre_tribute')}\n\n"
-                    f"CONTEXT: They messaged again but haven't paid yet. Light nudge back to the link. "
-                    f"Maybe a tiny bit playful/teasing about it. Keep it very short — 1-2 sentences."
+                    f"CONTEXT: They came back but haven't paid. You noticed. Don't reward it with warmth — "
+                    f"but don't be cold either. Light, slightly teasing. One callback to what they said if possible. "
+                    f"Point back to the link. 1-2 sentences."
                 )
         elif _tribute_pending_count == 2:
             _gate_system = (
                 f"{personality.get_system_prompt('pre_tribute')}\n\n"
-                f"CONTEXT: Third message, still not paid. Final response before silence. "
-                f"Keep it extremely short and unbothered. Something like 'lol i'll be here when you're ready' energy. 1 sentence."
+                f"CONTEXT: Third message, still unpaid. You're done engaging. "
+                f"One sentence. Pure 'i'll be here when you decide' energy. No frustration, no persuasion. "
+                f"You have other things going on. That should be obvious."
             )
 
         # Build conversation history for AI (include this message)
@@ -10596,10 +10646,13 @@ async def handle_text_message(event):
             _free_profile["findom_gate_shown"] = 3
         user_memory.save_profile(chat_id, force=True)
 
-        # Send payment invoice after first and second gate messages
-        if _tribute_pending_count <= 1 and PAYMENT_BOT_TOKEN:
-            await asyncio.sleep(random.uniform(1.0, 2.0))
-            await send_stars_invoice(chat_id, ACCESS_TIER_FAN_THRESHOLD)
+        # Send payment links after first and second gate messages
+        if _tribute_pending_count <= 1:
+            await asyncio.sleep(random.uniform(0.8, 1.5))
+            await client.send_message(chat_id, get_heserves_link(chat_id))
+            if PAYMENT_BOT_TOKEN:
+                await asyncio.sleep(random.uniform(0.5, 1.0))
+                await send_stars_invoice(chat_id, ACCESS_TIER_FAN_THRESHOLD)
         main_logger.info(f"[FINDOM_GATE] AI gate response #{_tribute_pending_count+1} ({_intent}) to {display_name} ({chat_id})")
 
         return  # STOP — FREE users never pass the gate in Kelly mode
