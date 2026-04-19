@@ -1,0 +1,82 @@
+version: "3.9"
+
+# KellyFindomBot — Local Development Stack
+# For production, use AWS ECS/Fargate (see infrastructure/terraform/)
+#
+# Usage:
+#   cp .env.example .env && vi .env   # fill in your credentials
+#   docker-compose up
+
+services:
+  kelly-bot:
+    build: .
+    container_name: kelly_findom_bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Override these for local dev — in prod they come from AWS Secrets Manager
+      - LOG_LEVEL=INFO
+      - AWS_REGION=us-east-1
+      # Set USE_AWS_SECRETS=false to read from .env directly (local dev)
+      - USE_AWS_SECRETS=false
+    volumes:
+      - kelly_logs:/app/logs
+      - kelly_profiles:/app/user_profiles
+      - kelly_media:/app/images_db
+      - kelly_videos:/app/videos
+      # Mount local persona for fast iteration
+      - ./kelly_persona.yaml:/app/kelly_persona.yaml:ro
+    ports:
+      - "8888:8888"   # monitoring dashboard
+    depends_on:
+      llama-server:
+        condition: service_healthy
+    command: >
+      --personality kelly_persona.yaml
+      --monitoring
+      --small-model
+      --log-dir /app/logs
+
+  # Local LLM backend — replace with AWS-hosted endpoint in production
+  llama-server:
+    image: ghcr.io/ggerganov/llama.cpp:server
+    container_name: llama_server
+    restart: unless-stopped
+    ports:
+      - "1234:8080"
+    volumes:
+      - llama_models:/models
+    command: >
+      -m /models/model.gguf
+      --host 0.0.0.0
+      --port 8080
+      -ngl 0
+      -c 8192
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/models"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # Monitoring dashboard proxy (nginx)
+  nginx:
+    image: nginx:alpine
+    container_name: kelly_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - kelly-bot
+    profiles:
+      - production
+
+volumes:
+  kelly_logs:
+  kelly_profiles:
+  kelly_media:
+  kelly_videos:
+  llama_models:

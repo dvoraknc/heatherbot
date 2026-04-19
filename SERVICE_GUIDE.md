@@ -1,166 +1,288 @@
-# Heather Bot - Service Management Guide
+# KellyFindomBot — Service Operations Guide
 
-## Quick Start Options
+## Quick Start
 
-### Option 1: Double-Click (Easiest)
-```
-C:\Users\groot\heather-bot\
-  START_HEATHER.bat     -- Double-click to start everything
-  STOP_HEATHER.bat      -- Double-click to stop everything
-  HEATHER_MANAGER.bat   -- Double-click for full control menu
-```
+### Local (Development)
 
-### Option 2: PowerShell Commands
-```powershell
-cd C:\Users\groot\heather-bot
+```bash
+# Start LLM backend first
+llama-server \
+  -m /path/to/Dolphin-2.9.3-Mistral-Nemo-12B-Q6_K.gguf \
+  --host 0.0.0.0 --port 1234 -ngl 99 -c 32768
 
-# Interactive menu
-.\heather_services.ps1
+# Verify LLM is up
+curl http://localhost:1234/v1/models
 
-# Direct commands
-.\heather_services.ps1 -Action startall
-.\heather_services.ps1 -Action stopall
-.\heather_services.ps1 -Action status
-
-# Individual services (llama, ollama, bot, comfyui, tts)
-.\heather_services.ps1 -Action start -Service llama
-.\heather_services.ps1 -Action start -Service bot
-.\heather_services.ps1 -Action restart -Service tts
+# Run the bot
+python kelly_telegram_bot.py \
+  --personality kelly_persona.yaml \
+  --small-model \
+  --monitoring
 ```
 
-### Option 3: Clean Bot Restart
-```powershell
-.\restart_bot.ps1
+### Production (AWS ECS)
+
+```bash
+# Deploy
+./deploy/deploy.sh
+
+# Check container logs
+aws logs tail /ecs/kelly-bot --follow --region us-east-1
+
+# Restart ECS service
+aws ecs update-service \
+  --cluster kelly-prod-cluster \
+  --service kelly-bot \
+  --force-new-deployment \
+  --region us-east-1
 ```
-Kills existing bot process, cleans stale Telethon session journal, starts fresh.
+
+---
 
 ## Service Architecture
 
 ```
 +--------------------------------------------------------------+
-|                    HEATHER BOT SYSTEM                        |
+|                     KELLY BOT SYSTEM                         |
 +--------------------------------------------------------------+
-|  +--------------+  +--------------+  +--------------+        |
-|  |   Ollama     |  | llama-server |  |   ComfyUI    |        |
-|  |  (LLaVA)     |  |  (Dolphin    |  |  (RealVisXL  |        |
-|  | Port 11434   |  |   2.9.3)     |  |   Lightning) |        |
-|  | Image AI     |  | Port 1234    |  | Port 8188    |        |
-|  | (fallback)   |  | Text AI      |  | Image Gen    |        |
-|  +--------------+  +--------------+  +--------------+        |
-|                          |                                    |
-|  +--------------+        |          +--------------+          |
-|  | Falconsai    |        |          |  Coqui TTS   |          |
-|  | ViT NSFW     |        |          | Port 5001    |          |
-|  +--------------+        |          +--------------+          |
-|                          |                                    |
-|         +----------------v-----------------+                  |
-|         |         Heather Bot              |                  |
-|         |    (Python / Telethon userbot)   |                  |
-|         |    Monitor dashboard: 8888       |                  |
-|         +----------------------------------+                  |
+|                                                              |
+|  +------------------+      +----------------------------+    |
+|  | llama-server     |      | Payment Bot (Bot API)      |    |
+|  | Port 1234        |      | PAYMENT_BOT_TOKEN          |    |
+|  | Text AI backend  |      | Sends invoices, receives   |    |
+|  | (Dolphin 12B)    |      | Stars payment events       |    |
+|  +------------------+      +----------------------------+    |
+|           |                          |                       |
+|  +--------v--------------------------v-----------------+     |
+|  |               Telethon Userbot                      |     |
+|  |         (kelly_telegram_bot.py)                     |     |
+|  |         BOT_PERSONA=kelly                           |     |
+|  |         Monitor Dashboard: 8888                     |     |
+|  +---------------------------------------------------------+  |
+|                                                              |
+|  Optional:                                                   |
+|  +------------------+      +----------------------------+    |
+|  | ElevenLabs TTS   |      | Coqui TTS (local)          |    |
+|  | API (cloud)      |      | Port 5001 (fallback)       |    |
+|  +------------------+      +----------------------------+    |
+|                                                              |
 +--------------------------------------------------------------+
 ```
+
+---
 
 ## Port Reference
 
-| Service | Port | URL | Purpose |
-|---------|------|-----|---------|
-| llama-server | 1234 | http://localhost:1234 | AI text generation (Dolphin 2.9.3) |
-| Coqui TTS | 5001 | http://localhost:5001 | Voice note generation |
-| Reddit Dashboard | 8080 | http://localhost:8080 | Reddit/FetLife chat UI |
-| ComfyUI | 8188 | http://localhost:8188 | AI image generation |
-| Bot Monitor | 8888 | http://localhost:8888 | Bot web dashboard |
-| Ollama | 11434 | http://localhost:11434 | Image analysis (fallback) |
-| Openclaw | 18789 | http://localhost:18789 | Agent gateway |
+| Service | Port | Purpose |
+|---------|------|---------|
+| llama-server | 1234 | AI text generation |
+| Bot Monitor | 8888 | Web dashboard (`--monitoring`) |
+| Coqui TTS | 5001 | Voice generation (optional) |
+| Ollama | 11434 | Image analysis (optional, `--image-port`) |
 
-## Startup Order (Handled Automatically)
+---
 
-1. **Ollama** - Image analysis service (auto-starts via startup entry)
-2. **llama-server** - Text AI model (loads Dolphin 2.9.3, ~10GB VRAM, takes ~30s)
-3. **Heather Bot** - Main application (waits for AI services)
-4. **Coqui TTS** - Voice note generation (loads XTTS model, takes ~30s)
-5. **ComfyUI** - Image generation (when enabled)
+## Environment Variables
 
-## Remote Access Watchdog
+All required variables are in `.env` (local dev) or AWS Secrets Manager (production):
 
-A scheduled task (`HeatherBot-RemoteAccessWatchdog`) runs every 5 minutes as SYSTEM to ensure remote access stays available:
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `TELEGRAM_API_ID` | ✅ | From my.telegram.org/apps |
+| `TELEGRAM_API_HASH` | ✅ | From my.telegram.org/apps |
+| `ADMIN_USER_ID` | ✅ | Your numeric Telegram user ID |
+| `BOT_PERSONA` | ✅ | Set to `kelly` |
+| `ENABLE_MONETIZATION` | ✅ | `true` in prod, `false` for free testing |
+| `PAYMENT_BOT_TOKEN` | ✅ | Bot API token from BotFather (receives Stars payments) |
+| `PAYMENT_BOT_USERNAME` | ✅ | Username of the payment bot |
+| `MONITOR_AUTH_TOKEN` | ✅ | Dashboard auth token |
+| `ELEVENLABS_API_KEY` | ❌ | Optional — voice notes |
+| `ELEVENLABS_VOICE_ID` | ❌ | Optional — voice notes |
+| `AWS_REGION` | ❌ | Required in prod ECS only |
 
-- Checks and restarts RDP + SSH services
-- Verifies ports 3389 and 22 are listening
-- Monitors Tailscale VPN tunnel
-- Network connectivity checks (8.8.8.8 / 1.1.1.1)
-- Disk space monitoring (auto-cleans at <5GB)
-- GPU health via nvidia-smi (temperature + TDR detection)
-- Sleep/hibernate prevention
-- Windows Update reboot detection
+---
 
-Log: `C:\AI\logs\watchdog.log`
+## Startup Sequence
 
-## GPU Notes
+The bot is self-contained. Start in this order:
 
-- **Dual RTX 3090** (24GB each)
-- **Driver**: 595.79 (March 2026)
-- **TDR Timeout**: 8 seconds (prevents false GPU timeout kills during LLM inference)
-- **LM Studio**: Auto-start DISABLED - was causing GPU TDR crashes by competing with llama-server for GPU resources. Do NOT re-enable.
+1. **LLM backend** (`llama-server` or compatible)  
+2. **Bot** (`python kelly_telegram_bot.py ...`)  
+3. Bot waits for first Telegram message — no background workers need pre-warming
 
-## Troubleshooting
+The re-engagement scanner starts automatically 5 minutes after bot startup.
 
-### Service won't start
-```powershell
-# Check what's using the port
-netstat -ano | findstr :1234
-netstat -ano | findstr :5001
-netstat -ano | findstr :8888
-
-# Kill process by PID
-taskkill /PID <pid> /F
-```
-
-### llama-server slow to load
-- Normal first load: ~30 seconds for Dolphin 12B Q6_K
-- Check GPU memory: `nvidia-smi`
-- Model location: `C:\Models\Dolphin-2.9.3-Mistral-Nemo-12B\`
-
-### Bot not responding
-1. Check bot process: `Get-Process python`
-2. Check text AI: `curl http://localhost:1234/v1/models`
-3. Check logs: `Get-Content C:\AI\logs\heather_bot.log -Tail 20`
-4. Clean restart: `.\restart_bot.ps1`
-
-### GPU issues
-```powershell
-# Check GPU status
-nvidia-smi
-
-# Check for recent TDR events
-Get-WinEvent -LogName System -MaxEvents 20 | Where-Object { $_.ProviderName -eq "nvlddmkm" }
-
-# Check watchdog log
-Get-Content C:\AI\logs\watchdog.log -Tail 20
-```
-
-### Reset everything
-```powershell
-.\heather_services.ps1 -Action stopall
-Start-Sleep 10
-.\heather_services.ps1 -Action startall
-```
+---
 
 ## Logs
 
-| Log | Location | Purpose |
-|-----|----------|---------|
-| Bot (primary) | `C:\AI\logs\heather_bot.log` | Main bot activity |
-| Bot (fallback) | `C:\Users\groot\heather-bot\logs\heather_bot.log` | When started without --log-dir |
-| TTS | `C:\Users\groot\heather-bot\logs\tts.log` | Voice note generation |
-| Watchdog | `C:\AI\logs\watchdog.log` | Remote access monitoring |
-| Auto-changes | `C:\AI\logs\auto_changes.log` | Automated code changes |
-| Reports | `C:\AI\logs\reports\` | Periodic bot activity reports |
+### Local
 
-## Configuration
+```bash
+# Default log location
+tail -f logs/kelly_bot.log
 
-- `.env` - Telegram token, feature flags
-- `heather_personality.yaml` - Character definition
-- `heather_kink_personas.yaml` - Kink persona variants
-- `heather_stories.yaml` - Pre-written story pool
-- `heather_services.ps1` - Service paths and startup args
+# Or with --log-dir flag
+tail -f /your/log/path/kelly_bot.log
+```
+
+### AWS ECS
+
+```bash
+# Stream logs
+aws logs tail /ecs/kelly-bot --follow --region us-east-1
+
+# Last 100 lines
+aws logs get-log-events \
+  --log-group-name /ecs/kelly-bot \
+  --log-stream-name <stream-name> \
+  --limit 100
+```
+
+### Key log prefixes
+
+| Prefix | Meaning |
+|--------|---------|
+| `[FINDOM_GATE]` | Free-tier gate triggered |
+| `[REENGAGEMENT]` | Re-engagement scanner activity |
+| `[PAYMENT]` | Stars payment events |
+| `[SESSION]` | Telegram session events (auth, reconnect) |
+| `[SECURITY]` | CSAM flags, flood detection, blocks |
+| `[ADMIN]` | Admin commands received |
+
+---
+
+## Troubleshooting
+
+### Bot not responding to messages
+
+1. Check LLM is up: `curl http://localhost:1234/v1/models`
+2. Check bot process: `pgrep -f heather_telegram_bot`
+3. Check logs for errors
+4. Verify Telegram session: `python telethon_test.py`
+
+### Stars invoice not sending
+
+1. Verify `PAYMENT_BOT_TOKEN` is set and valid
+2. The payment bot must be started separately (it's a standard Bot API bot)
+3. Check the bot is not blocked by the user
+
+### Session expired / auth error
+
+The bot saves session state to `kelly_session.session`. If this file is corrupted or the auth key is revoked:
+
+```bash
+# Delete old session and re-authenticate
+rm kelly_session.session
+python kelly_telegram_bot.py --personality kelly_persona.yaml --small-model
+# Enter phone number and verification code when prompted
+```
+
+In production (ECS), upload the new session file to S3:
+```bash
+aws s3 cp kelly_session.session \
+  s3://kelly-prod-media-<account-id>/session/kelly_session.session
+```
+
+### PeerFloodError in logs
+
+This means Telegram is rate-limiting the account. The bot automatically pauses re-engagement for 24h. Operator should:
+1. Stop sending any outgoing messages for 24-48h
+2. Use the real Telegram app from the phone to do normal activity
+3. Gradually resume
+
+### FloodWaitError in logs
+
+Normal — Telethon automatically sleeps for the required time (`flood_sleep_threshold=60`). No action needed.
+
+---
+
+## Admin Commands (in Telegram)
+
+Send from your own Saved Messages while logged in as ADMIN_USER_ID:
+
+```
+/stats                    — User stats, tier breakdown
+/admin_flags              — Review CSAM flags
+/block <user_id>          — Block user permanently
+/unblock <user_id>        — Unblock user
+/takeover <user_id>       — Take manual control of a conversation
+/botreturn <user_id>      — Hand conversation back to bot
+/stories                  — List story bank
+/stories reload           — Hot-reload stories YAML
+/menu                     — Interactive menu
+```
+
+---
+
+## Monitoring Dashboard
+
+Available at `http://localhost:8888` when running with `--monitoring`.
+
+Protected by `MONITOR_AUTH_TOKEN` set in `.env`.
+
+Shows:
+- Active users and message volume
+- Tier breakdown (FREE / PAID / VIP)
+- Conversion funnel
+- Recent Star transactions
+- Re-engagement stats
+- Session state
+
+---
+
+## Updating the Bot
+
+### Local
+
+```bash
+git pull
+pip install -r requirements.txt --upgrade
+# Restart bot process
+```
+
+### AWS ECS
+
+```bash
+./deploy/deploy.sh
+```
+
+Or push to `main` — GitHub Actions auto-deploys.
+
+---
+
+## Backup & Recovery
+
+### User profiles
+
+User profiles are stored as JSON in `user_profiles/`. In production (ECS), these live on EFS (persistent across container restarts).
+
+Backup:
+```bash
+# Local
+tar czf user_profiles_backup_$(date +%Y%m%d).tar.gz user_profiles/
+
+# AWS (EFS auto-persists — no manual backup needed unless migrating)
+aws efs describe-file-systems
+```
+
+### Session file
+
+**Critical** — back up `kelly_session.session` after every fresh authentication.
+
+```bash
+# Local backup
+cp kelly_session.session kelly_session.session.bak
+
+# Production — already on EFS via S3 copy during setup
+```
+
+---
+
+## Security Notes
+
+- Never commit `.env` or `*.session` to git (both are in `.gitignore`)
+- Rotate `MONITOR_AUTH_TOKEN` if the dashboard is exposed to the internet
+- In production, all secrets come from AWS Secrets Manager — no static credentials in the container
+- The bot uses `device_model="iPhone 15 Pro"` to appear as a real mobile client
+- Never run two processes with the same session file simultaneously

@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Lint, YAML, and Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt ruff
+
+      - name: Lint key modules
+        run: |
+          ruff check aws_secrets_loader.py kelly_telegram_bot.py postprocess.py telethon_test.py \
+            --select E,F,W --ignore E501,E402
+
+      - name: Validate YAML files
+        run: |
+          python - <<'PY'
+          import yaml
+          for f in ['kelly_persona.yaml', 'persona_example.yaml', 'heather_kink_personas.yaml']:
+              with open(f, encoding='utf-8') as fh:
+                  yaml.safe_load(fh)
+              print(f'OK: {f}')
+          PY
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -p "test_*.py" -v

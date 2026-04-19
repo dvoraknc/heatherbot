@@ -1,0 +1,148 @@
+name: Deploy KellyFindomBot to AWS
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deploy environment'
+        required: true
+        default: 'prod'
+        type: choice
+        options: [prod, staging]
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPO: kelly-prod-bot
+  ECS_CLUSTER: kelly-prod-cluster
+  ECS_SERVICE: kelly-prod-bot
+
+jobs:
+  # ─── Lint & Validate ──────────────────────────────────────────────────────
+  lint:
+    name: Lint & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install linting tools
+        run: pip install -r requirements.txt ruff
+
+      - name: Lint bot code
+        run: |
+          ruff check aws_secrets_loader.py kelly_telegram_bot.py postprocess.py telethon_test.py \
+            --select E,F,W --ignore E501,E402
+
+      - name: Validate YAML personas
+        run: python -c "
+import yaml
+for f in ['kelly_persona.yaml', 'persona_example.yaml', 'heather_kink_personas.yaml']:
+    with open(f) as fh:
+        yaml.safe_load(fh)
+    print(f'OK: {f}')
+"
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+
+  # ─── Security scan ────────────────────────────────────────────────────────
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for hardcoded secrets
+        run: |
+          # Fail if any real API key patterns appear in committed code
+          if grep -rE 'AKIAT[A-Z0-9]{16}|sk_[a-z0-9]{40}|api_hash\s*=\s*"[a-fA-F0-9]{32}"' \
+            --include="*.py" --include="*.yaml" --include="*.json" --include="*.sh" \
+            --exclude-dir=".git" .; then
+            echo "ERROR: Hardcoded secret detected in source code!"
+            exit 1
+          fi
+          echo "OK: No hardcoded secrets found"
+
+  # ─── Build & Push ─────────────────────────────────────────────────────────
+  build-push:
+    name: Build & Push to ECR
+    runs-on: ubuntu-latest
+    needs: [lint, security]
+    outputs:
+      image-tag: ${{ steps.meta.outputs.image-tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build metadata
+        id: meta
+        run: |
+          SHORT="${GITHUB_SHA:0:7}"
+          echo "image-tag=${SHORT}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        run: |
+          ECR_URI="${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO }}"
+          TAG="${{ steps.meta.outputs.image-tag }}"
+          docker build -t "${ECR_URI}:${TAG}" -t "${ECR_URI}:latest" .
+          docker push "${ECR_URI}:${TAG}"
+          docker push "${ECR_URI}:latest"
+
+  # ─── Deploy ───────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to ECS
+    runs-on: ubuntu-latest
+    needs: build-push
+    environment: ${{ github.event.inputs.environment || 'prod' }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Force new ECS deployment
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service ${{ env.ECS_SERVICE }} \
+            --force-new-deployment \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Wait for service stable
+        run: |
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services ${{ env.ECS_SERVICE }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Deployment summary
+        run: |
+          echo "## Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "- Image tag: \`${{ needs.build-push.outputs.image-tag }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Cluster: \`${{ env.ECS_CLUSTER }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Service: \`${{ env.ECS_SERVICE }}\`" >> $GITHUB_STEP_SUMMARY
