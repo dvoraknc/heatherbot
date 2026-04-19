@@ -46,6 +46,7 @@ import sys
 # TELETHON IMPORTS (replaces telebot)
 # ============================================================================
 from telethon import TelegramClient, events
+from telethon.sessions import StringSession
 from telethon.errors import (
     FileReferenceExpiredError, AuthKeyUnregisteredError,
     FloodWaitError, PeerFloodError, UserPrivacyRestrictedError,
@@ -98,6 +99,7 @@ if not API_ID or not API_HASH:
     print("ERROR: TELEGRAM_API_ID and TELEGRAM_API_HASH must be set in .env or environment")
     sys.exit(1)
 SESSION_NAME = args.session
+SESSION_STRING = os.getenv("TELEGRAM_STRING_SESSION", "").strip()
 
 # ============================================================================
 # LOGGING SETUP - Centralized Multi-Service Logging
@@ -373,7 +375,17 @@ ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))  # Set in .env for admin co
 ALERT_COOLDOWN_SECONDS = 300  # Don't spam alerts more than once per 5 minutes per issue
 
 # Endpoints
-TEXT_AI_ENDPOINT = f"http://127.0.0.1:{args.text_port}/v1/chat/completions"
+# Groq free-tier support: set GROQ_API_KEY env var to use Groq cloud (no cost, ~300 tok/s)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+if GROQ_API_KEY:
+    TEXT_AI_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
+    TEXT_AI_HEADERS = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+    TEXT_AI_MODEL = GROQ_MODEL
+else:
+    TEXT_AI_ENDPOINT = f"http://127.0.0.1:{args.text_port}/v1/chat/completions"
+    TEXT_AI_HEADERS = {"Content-Type": "application/json"}
+    TEXT_AI_MODEL = "local-model"
 IMAGE_AI_ENDPOINT = f"http://localhost:{args.image_port}"
 TTS_ENDPOINT = f"http://127.0.0.1:{args.tts_port}"
 COMFYUI_URL = "http://127.0.0.1:8188"
@@ -2539,7 +2551,7 @@ async def maybe_send_tip_hook(event, chat_id: int) -> bool:
         # Natural delay — feels like she thought of it, not a cron job
         await asyncio.sleep(random.uniform(3.0, 6.0))
         try:
-            async with client.action(event.input_chat, 'typing'):
+            async with client.action(event.chat_id, 'typing'):
                 await asyncio.sleep(random.uniform(1.0, 2.5))
         except Exception:
             await asyncio.sleep(random.uniform(1.0, 2.5))
@@ -2614,7 +2626,7 @@ async def maybe_send_memory_upsell(event, chat_id: int) -> bool:
     try:
         await asyncio.sleep(random.uniform(4.0, 8.0))
         try:
-            async with client.action(event.input_chat, 'typing'):
+            async with client.action(event.chat_id, 'typing'):
                 await asyncio.sleep(random.uniform(1.0, 2.0))
         except Exception:
             await asyncio.sleep(random.uniform(1.0, 2.0))
@@ -2699,7 +2711,7 @@ async def maybe_send_kelly_tribute_ask(event, chat_id: int) -> bool:
     try:
         await asyncio.sleep(random.uniform(2.0, 5.0))
         try:
-            async with client.action(event.input_chat, 'typing'):
+            async with client.action(event.chat_id, 'typing'):
                 await asyncio.sleep(random.uniform(1.5, 3.0))
         except Exception:
             await asyncio.sleep(random.uniform(1.5, 3.0))
@@ -3145,6 +3157,17 @@ DEFAULT_MODE = 'chat'
 MAX_RECENT_MESSAGES = 50
 PHOTO_REQUEST_COOLDOWN = 300
 INACTIVE_CLEANUP_HOURS = 24
+
+# 2026 anti-ban hardening: enforce minimum spacing between outgoing messages,
+# and honor FloodWait/PeerFlood with a global cooloff.
+SAFE_GLOBAL_SEND_GAP = float(os.getenv("SAFE_GLOBAL_SEND_GAP", "1.2"))
+SAFE_CHAT_SEND_GAP = float(os.getenv("SAFE_CHAT_SEND_GAP", "2.4"))
+SAFE_FLOODWAIT_MAX_SLEEP = int(os.getenv("SAFE_FLOODWAIT_MAX_SLEEP", "180"))
+SAFE_MARK_READ_ENABLED = os.getenv("SAFE_MARK_READ", "true").lower() == "true"
+
+_global_send_pause_until = 0.0
+_last_global_send_ts = 0.0
+_last_chat_send_ts: Dict[int, float] = {}
 
 # Group chat settings
 BOT_TRIGGERS = ['heather', '@ubermommy']  # Updated for userbot username
@@ -6745,6 +6768,18 @@ async def verify_services_at_startup() -> dict:
 # ============================================================================
 
 def check_text_ai_status() -> tuple[bool, str]:
+    if GROQ_API_KEY:
+        try:
+            response = requests.get(
+                "https://api.groq.com/openai/v1/models",
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                timeout=8
+            )
+            if response.status_code == 200:
+                return True, f"Groq online ({GROQ_MODEL})"
+            return False, f"Groq HTTP {response.status_code}"
+        except Exception as e:
+            return False, f"Groq error: {e}"
     try:
         response = requests.get(f"http://127.0.0.1:{args.text_port}/v1/models", timeout=5)
         if response.status_code == 200:
@@ -7526,8 +7561,9 @@ def get_text_ai_response(chat_id: int, user_message: str, retry_count: int = 0, 
         with PerformanceTimer('TEXT_AI', 'generate', f"chat_id={chat_id} retry={retry_count}") as timer:
             response = requests.post(
                 TEXT_AI_ENDPOINT,
+                headers=TEXT_AI_HEADERS,
                 json={
-                    "model": "local-model",
+                    "model": TEXT_AI_MODEL,
                     "messages": messages,
                     "temperature": temperature,
                     "max_tokens": max_tokens,
@@ -8541,6 +8577,83 @@ async def _send_contextual_voice(chat_id: int, text: str, delay: float = 3.0):
         main_logger.warning(f"[VOICE_CONTEXTUAL] Error for {chat_id}: {e}")
 
 
+async def safe_mark_read(event) -> None:
+    """Best-effort read receipt to keep chats in sync with a human account."""
+    if not SAFE_MARK_READ_ENABLED:
+        return
+    try:
+        if is_group_chat_event(event):
+            return
+        if not getattr(event, "message", None):
+            return
+        await client.send_read_acknowledge(
+            event.chat_id,
+            max_id=event.message.id,
+            clear_mentions=True,
+        )
+    except Exception as e:
+        main_logger.debug(f"[READ] Ack failed for {getattr(event, 'chat_id', '?')}: {e}")
+
+
+async def safe_send_text(chat_id: int, text: str, event=None, reply_to: Optional[int] = None) -> bool:
+    """Send text with anti-flood pacing and graceful FloodWait handling."""
+    global _global_send_pause_until, _last_global_send_ts, _last_chat_send_ts
+
+    if not text or not str(text).strip():
+        return False
+
+    now = time.time()
+    if now < _global_send_pause_until:
+        await asyncio.sleep(_global_send_pause_until - now)
+
+    now = time.time()
+    global_gap = SAFE_GLOBAL_SEND_GAP - (now - _last_global_send_ts)
+    if global_gap > 0:
+        await asyncio.sleep(global_gap)
+
+    now = time.time()
+    last_chat_ts = _last_chat_send_ts.get(chat_id, 0)
+    chat_gap = SAFE_CHAT_SEND_GAP - (now - last_chat_ts)
+    if chat_gap > 0:
+        await asyncio.sleep(chat_gap)
+
+    async def _send_once():
+        if event is not None:
+            if reply_to:
+                return await event.respond(text, reply_to=reply_to)
+            return await event.respond(text)
+        return await client.send_message(chat_id, text, reply_to=reply_to)
+
+    try:
+        await _send_once()
+        now = time.time()
+        _last_global_send_ts = now
+        _last_chat_send_ts[chat_id] = now
+        return True
+    except FloodWaitError as e:
+        wait_seconds = max(1, int(getattr(e, 'seconds', 1)))
+        wait_seconds = min(wait_seconds, SAFE_FLOODWAIT_MAX_SLEEP)
+        _global_send_pause_until = time.time() + wait_seconds
+        main_logger.warning(f"[SEND] FloodWait for {chat_id}: sleeping {wait_seconds}s before retry")
+        await asyncio.sleep(wait_seconds)
+        try:
+            await _send_once()
+            now = time.time()
+            _last_global_send_ts = now
+            _last_chat_send_ts[chat_id] = now
+            return True
+        except Exception as retry_err:
+            main_logger.error(f"[SEND] Retry failed for {chat_id}: {retry_err}")
+            return False
+    except PeerFloodError:
+        _global_send_pause_until = time.time() + 3600
+        main_logger.error("[SEND] PeerFloodError triggered; global outbound pause for 1 hour")
+        return False
+    except Exception as e:
+        main_logger.error(f"[SEND] Failed to send message to {chat_id}: {e}")
+        return False
+
+
 # ============================================================================
 # TELETHON CLIENT SETUP
 # ============================================================================
@@ -8552,7 +8665,7 @@ async def _send_contextual_voice(chat_id: int, text: str, delay: float = 3.0):
 # after network drops. auto_reconnect=True is the Telethon default but
 # is explicit here for clarity.
 client = TelegramClient(
-    SESSION_NAME,
+    StringSession(SESSION_STRING) if SESSION_STRING else SESSION_NAME,
     API_ID,
     API_HASH,
     device_model="iPhone 15 Pro",
@@ -10175,6 +10288,9 @@ async def handle_text_message(event):
     if is_group_chat_event(event):
         return
 
+    # Keep message state synced in Telegram UI; does not block reply pipeline.
+    asyncio.create_task(safe_mark_read(event))
+
     display_name = get_user_display_name(chat_id)
     main_logger.info(f"[{request_id}] Text from {display_name} ({chat_id}) ({mode}): {user_message[:100]}")
     stats['messages_processed'] += 1
@@ -10345,138 +10461,146 @@ async def handle_text_message(event):
         if _intent == "PROMISE_TO_PAY":
             # Don't re-invoice, don't gate again — just acknowledge and wait
             _promise_ack = random.choice([
-                "Take your time.",
-                "I'll be here.",
-                "Good. Let me know when it's done.",
+                "lol okay, i'll be here 😏",
+                "take your time, i'm around",
+                "ok cool 😊",
+                "sounds good",
             ])
-            async with client.action(event.input_chat, 'typing'):
+            async with client.action(event.chat_id, 'typing'):
                 await asyncio.sleep(random.uniform(1.5, 3.0))
-            await event.respond(_promise_ack)
+            await safe_send_text(chat_id, _promise_ack, event=event)
             store_message(chat_id, "Kelly", _promise_ack)
             main_logger.info(f"[FINDOM_GATE] Promise-to-pay ack for {display_name} ({chat_id})")
             return
 
+        # 4th+ unpaid messages: do NOT show typing then vanish.
+        # Send sparse low-pressure nudges instead (cooldown), which avoids ghosting behavior.
+        _gate_nudge_cooldown = int(os.getenv("FINDOM_GATE_NUDGE_COOLDOWN_SECONDS", "900"))
+        if _tribute_pending_count >= 3:
+            _last_nudge_at = float(_free_profile.get("findom_gate_last_nudge_at", 0) or 0)
+            _since_last = time.time() - _last_nudge_at
+            if _since_last < _gate_nudge_cooldown:
+                main_logger.info(
+                    f"[FINDOM_GATE] Cooldown silent for {display_name} ({chat_id}) "
+                    f"({int(_since_last)}s/{_gate_nudge_cooldown}s)"
+                )
+                return
+
+            _gate_msg = random.choice([
+                "i'm around when you're ready. link's below 💋",
+                "still here. once the $50 goes through, i'm all yours 😏",
+                "tap the link when you want in. i'll pick up from there",
+            ])
+            if await safe_send_text(chat_id, _gate_msg, event=event):
+                store_message(chat_id, "Kelly", _gate_msg)
+                if chat_id not in conversations:
+                    conversations[chat_id] = deque()
+                conversations[chat_id].append({"role": "user", "content": user_message})
+                conversations[chat_id].append({"role": "assistant", "content": _gate_msg})
+                _free_profile["findom_gate_last_nudge_at"] = time.time()
+                _free_profile["findom_gate_shown"] = max(_tribute_pending_count, 3)
+                user_memory.save_profile(chat_id, force=True)
+                main_logger.info(f"[FINDOM_GATE] Cooldown nudge sent to {display_name} ({chat_id})")
+            return
+
         # Show typing indicator before every gate response (looks human)
-        async with client.action(event.input_chat, 'typing'):
-            await asyncio.sleep(random.uniform(2.0, 4.0))
+        async with client.action(event.chat_id, 'typing'):
+            await asyncio.sleep(random.uniform(2.0, 4.5))
+
+        # Build intent context for the AI
+        _intent_hints = {
+            "POSITIVE_CONFIRM": "They seem eager/agreeable. Be warm but still direct them to pay. Short and playful.",
+            "READY": "They clearly know findom already. Acknowledge that, make it easy, point to link.",
+            "TIME_WASTER": "They're resisting or complaining about paying. Be cool about it, one casual response, don't argue.",
+            "TESTER": "They're testing you or asking weird questions. Stay in character, redirect to tribute.",
+            "HIGH_VALUE": "They seem genuinely interesting/engaged. A little warmer, make the $50 feel like access to something real.",
+            "PROMISE_TO_PAY": "They say they're about to pay. Just acknowledge briefly and wait.",
+            "WINDOW_SHOPPER": "Casual opener, just be yourself and point to the link. Natural and low-pressure.",
+        }
+        _intent_ctx = _intent_hints.get(_intent, "Natural opener. Point to the link casually.")
 
         if _tribute_pending_count == 0:
-            # ── First contact — respond based on who they appear to be ──
-            if _intent == "POSITIVE_CONFIRM":
-                # They just said "yes/ok" — probably responding to someone else or confused
-                # Treat as window shopper, get the link in front of them
-                _gate_msg = random.choice([
-                    "Good. Then you know what to do. $50 via the link below. 💰",
-                    "Perfect. Tap the link and we get started. 💰",
-                ])
-            elif _intent == "READY":
-                # Sub who already knows findom — warm, inevitable tone
-                _gate_msg = random.choice([
-                    "Good. You already know how this works. $50 opens the door. Link below. 💰",
-                    "I appreciate a sub who doesn't need explaining. Tribute link is right below you.",
-                    "Already in the right headspace I see. $50 and we actually talk. Here's the link. 😈",
-                ])
-            elif _intent == "TIME_WASTER":
-                # Entitlement signals — cool, dismissive, one shot
-                _gate_msg = random.choice([
-                    "I don't negotiate my rates. Link is there when you're ready.",
-                    "Free subs aren't my thing. You know where to find me when that changes. 💰",
-                    "Not interested in convincing you. The link is below.",
-                ])
-            elif _intent == "TESTER":
-                # Probing for AI — bored, dominant, in-character
-                _gate_msg = random.choice([
-                    "Interesting opener. Tribute first, then we can have whatever conversation you want. 💰",
-                    "Questions after tribute. Link's below.",
-                    "I answer to paying subs. Tap the link and we'll talk. 😈",
-                ])
-            elif _intent == "HIGH_VALUE":
-                # Engaged, thoughtful — slightly warmer, make the $50 feel like access to something real
-                _gate_msg = random.choice([
-                    "Already intrigued by you. $50 unlocks the real conversation — tap the link. 😈",
-                    "You seem like someone worth talking to. So let's make it official. $50, link below.",
-                    "Good energy. Tribute first and I'll give you my full attention. Link's below. 💰",
-                ])
+            _gate_system = (
+                f"{personality.get_system_prompt('pre_tribute')}\n\n"
+                f"CONTEXT: This is their FIRST message. Intent read: {_intent}. {_intent_ctx}\n"
+                f"The payment link will be attached below your message automatically — just reference it naturally like 'link's below' or 'tap the link'.\n"
+                f"Keep it to 1-3 sentences. Sound like you're texting, not writing an email."
+            )
+        elif _tribute_pending_count == 1:
+            if _intent == "TIME_WASTER":
+                _gate_system = (
+                    f"{personality.get_system_prompt('pre_tribute')}\n\n"
+                    f"CONTEXT: They're pushing back on paying. This is your LAST response before going silent. "
+                    f"Be casual and unbothered about it — not rude, just done. 1-2 sentences max."
+                )
             else:
-                # Window shopper — matter-of-fact, no begging
-                _gate_msg = random.choice([
-                    "Hey. You know how findom works. $50 opens this door. Link is below.",
-                    "I don't do free previews. $50 gets you my real attention. Tap the link.",
-                    "My time has a price. $50 gets you access. Link below. 💰",
-                    "Tribute first, conversation after. $50 via the link below.",
-                    "You came here for a reason. That reason costs $50. Link is right there. 😈",
-                ])
-            await event.respond(_gate_msg)
-            store_message(chat_id, "Kelly", _gate_msg)
-            if chat_id not in conversations:
-                conversations[chat_id] = deque()
-            conversations[chat_id].append({"role": "assistant", "content": _gate_msg})
+                _gate_system = (
+                    f"{personality.get_system_prompt('pre_tribute')}\n\n"
+                    f"CONTEXT: They messaged again but haven't paid yet. Light nudge back to the link. "
+                    f"Maybe a tiny bit playful/teasing about it. Keep it very short — 1-2 sentences."
+                )
+        elif _tribute_pending_count == 2:
+            _gate_system = (
+                f"{personality.get_system_prompt('pre_tribute')}\n\n"
+                f"CONTEXT: Third message, still not paid. Final response before silence. "
+                f"Keep it extremely short and unbothered. Something like 'lol i'll be here when you're ready' energy. 1 sentence."
+            )
+
+        # Build conversation history for AI (include this message)
+        _gate_history = list(conversations.get(chat_id, []))
+        _gate_history.append({"role": "user", "content": user_message})
+
+        # Call AI for a real, human response
+        try:
+            import requests as _req
+            _ai_payload = {
+                "model": TEXT_AI_MODEL,
+                "messages": [{"role": "system", "content": _gate_system}] + _gate_history[-6:],
+                "temperature": 0.85,
+                "max_tokens": 120,
+                "stream": False,
+                "top_p": 0.9,
+                "frequency_penalty": 0.4,
+                "presence_penalty": 0.3,
+            }
+            _ai_resp = _req.post(TEXT_AI_ENDPOINT, headers=TEXT_AI_HEADERS, json=_ai_payload, timeout=20)
+            if _ai_resp.status_code == 200:
+                _gate_msg = _ai_resp.json()["choices"][0]["message"]["content"].strip()
+                text_ai_health.record_success()
+            else:
+                raise Exception(f"HTTP {_ai_resp.status_code}")
+        except Exception as _e:
+            main_logger.warning(f"[FINDOM_GATE] AI call failed ({_e}), using fallback")
+            _fallbacks = {
+                "READY": "oh you get it already 😏 link's below, $50 and we actually talk",
+                "TIME_WASTER": "haha fair enough. link's there when you change your mind",
+                "TESTER": "lol tribute first, questions after — link's below",
+                "HIGH_VALUE": "okay i'm intrigued ngl. $50 gets you my actual attention, link below",
+            }
+            _gate_msg = _fallbacks.get(_intent, "hey 👋 so $50 is how this starts — link's right below")
+
+        await safe_send_text(chat_id, _gate_msg, event=event)
+        store_message(chat_id, "Kelly", _gate_msg)
+        if chat_id not in conversations:
+            conversations[chat_id] = deque()
+        conversations[chat_id].append({"role": "user", "content": user_message})
+        conversations[chat_id].append({"role": "assistant", "content": _gate_msg})
+
+        # Track gate state
+        if _tribute_pending_count == 0:
             _free_profile["findom_gate_shown"] = 1
             _free_profile["findom_intent"] = _intent
-            user_memory.save_profile(chat_id, force=True)
-            if PAYMENT_BOT_TOKEN:
-                await asyncio.sleep(random.uniform(1.0, 2.0))
-                await send_stars_invoice(chat_id, ACCESS_TIER_FAN_THRESHOLD)
-            main_logger.info(f"[FINDOM_GATE] First gate ({_intent}) shown to {display_name} ({chat_id})")
-
         elif _tribute_pending_count == 1:
-            # ── Second contact — detect if they're arguing or still considering ──
-            if _intent == "TIME_WASTER":
-                # They're complaining — last response, then permanent silence
-                _remind = random.choice([
-                    "My rates don't change. You know where the link is.",
-                    "Not going to argue about this. Link's still there.",
-                ])
-                await event.respond(_remind)
-                store_message(chat_id, "Kelly", _remind)
-                _free_profile["findom_gate_shown"] = 10  # skip straight to silence
-                user_memory.save_profile(chat_id, force=True)
-                main_logger.info(f"[FINDOM_GATE] Time-waster final response to {display_name} ({chat_id})")
-            elif _intent in ("READY", "POSITIVE_CONFIRM"):
-                # They came back ready — warm nudge + fresh invoice
-                _remind = random.choice([
-                    "The link is still there. One tap. 💰",
-                    "Good. Tap it and we start. 💰",
-                ])
-                await event.respond(_remind)
-                store_message(chat_id, "Kelly", _remind)
-                if PAYMENT_BOT_TOKEN:
-                    await asyncio.sleep(random.uniform(1.0, 2.0))
-                    await send_stars_invoice(chat_id, ACCESS_TIER_FAN_THRESHOLD)
-                _free_profile["findom_gate_shown"] = 2
-                user_memory.save_profile(chat_id, force=True)
-                main_logger.info(f"[FINDOM_GATE] Ready sub nudge to {display_name} ({chat_id})")
-            else:
-                # Generic 2nd reminder
-                _remind = random.choice([
-                    "Still here. Link is above you. 💰",
-                    "The door's still open. $50 and we talk for real.",
-                    "No tribute, no access. Simple.",
-                ])
-                await event.respond(_remind)
-                store_message(chat_id, "Kelly", _remind)
-                _free_profile["findom_gate_shown"] = 2
-                user_memory.save_profile(chat_id, force=True)
-                main_logger.info(f"[FINDOM_GATE] Reminder #2 to {display_name} ({chat_id})")
-
+            _free_profile["findom_gate_shown"] = 2 if _intent != "TIME_WASTER" else 10
         elif _tribute_pending_count == 2:
-            # ── Third contact — final word, then silence ──
-            _final = random.choice([
-                "I'll be here when you decide.",
-                "The link isn't going anywhere.",
-            ])
-            await event.respond(_final)
-            store_message(chat_id, "Kelly", _final)
             _free_profile["findom_gate_shown"] = 3
-            user_memory.save_profile(chat_id, force=True)
-            main_logger.info(f"[FINDOM_GATE] Final response to {display_name} ({chat_id})")
+        user_memory.save_profile(chat_id, force=True)
 
-        else:
-            # 4th+ attempt — silent ignore.
-            # NOTE: payment tier is checked at the TOP of this block — if they actually paid,
-            # get_access_tier() returns "PAID" and this gate never fires. Silent ignore is only
-            # for confirmed non-payers who have already received 3 responses.
-            main_logger.info(f"[FINDOM_GATE] Silent ignore for {display_name} ({chat_id}) (count={_tribute_pending_count})")
+        # Send payment invoice after first and second gate messages
+        if _tribute_pending_count <= 1 and PAYMENT_BOT_TOKEN:
+            await asyncio.sleep(random.uniform(1.0, 2.0))
+            await send_stars_invoice(chat_id, ACCESS_TIER_FAN_THRESHOLD)
+        main_logger.info(f"[FINDOM_GATE] AI gate response #{_tribute_pending_count+1} ({_intent}) to {display_name} ({chat_id})")
 
         return  # STOP — FREE users never pass the gate in Kelly mode
 
@@ -11093,7 +11217,7 @@ async def handle_text_message(event):
                     await asyncio.sleep(read_delay)
                     # Simulate typing for realism (stories are long)
                     try:
-                        async with client.action(event.input_chat, 'typing'):
+                        async with client.action(event.chat_id, 'typing'):
                             await asyncio.sleep(random.uniform(3.0, 6.0))
                     except Exception:
                         await asyncio.sleep(random.uniform(3.0, 6.0))
@@ -11151,7 +11275,7 @@ async def handle_text_message(event):
     if show_read_first and extra_delay > 0:
         # Show "read" receipt, then pause (simulates seeing message but being distracted)
         try:
-            async with client.action(event.input_chat, 'typing'):
+            async with client.action(event.chat_id, 'typing'):
                 await asyncio.sleep(0.1)  # Brief typing flash = "read"
         except Exception:
             pass
@@ -11181,7 +11305,7 @@ async def handle_text_message(event):
         return resp, time.time() - start
 
     try:
-        async with client.action(event.input_chat, 'typing'):
+        async with client.action(event.chat_id, 'typing'):
             response, response_time = await _generate_response()
     except Exception as e:
         main_logger.debug(f"Typing indicator failed: {e}, continuing without it")
@@ -11191,7 +11315,7 @@ async def handle_text_message(event):
     if is_duplicate_response(chat_id, response):
         main_logger.info(f"[{request_id}] Duplicate response detected for {chat_id}, regenerating with higher temp...")
         try:
-            async with client.action(event.input_chat, 'typing'):
+            async with client.action(event.chat_id, 'typing'):
                 # Use retry_for_duplicate=2 to get higher temperature (0.78 + 0.16 = 0.94)
                 response, response_time = await _generate_response(retry_for_duplicate=2)
         except Exception:
@@ -11300,7 +11424,7 @@ async def handle_text_message(event):
             else:
                 # TTS failed — auto-disable voice mode silently, just send as text
                 voice_mode_users.discard(chat_id)
-                await event.respond(response)
+                await safe_send_text(chat_id, response, event=event)
                 _speaker = "Kelly" if KELLY_MODE else "Heather"
                 store_message(chat_id, _speaker, response)
                 main_logger.info(f"Voice mode auto-disabled for {chat_id} due to TTS failure")
@@ -11310,7 +11434,7 @@ async def handle_text_message(event):
             # Send reaction starter if applicable
             if reaction_text:
                 await asyncio.sleep(random.uniform(0.3, 0.8))
-                await event.respond(reaction_text)
+                await safe_send_text(chat_id, reaction_text, event=event)
                 store_message(chat_id, "Heather", reaction_text)
                 await asyncio.sleep(random.uniform(0.5, 1.2))
 
@@ -11320,16 +11444,16 @@ async def handle_text_message(event):
 
                 # Show typing indicator
                 try:
-                    async with client.action(event.input_chat, 'typing'):
+                    async with client.action(event.chat_id, 'typing'):
                         await asyncio.sleep(typing_delay)
                 except Exception:
                     await asyncio.sleep(typing_delay)
 
                 # First part of response can quote-reply the user's message
                 if i == 0 and _reply_to_id:
-                    await event.respond(part, reply_to=_reply_to_id)
+                    await safe_send_text(chat_id, part, event=event, reply_to=_reply_to_id)
                 else:
-                    await event.respond(part)
+                    await safe_send_text(chat_id, part, event=event)
                 store_message(chat_id, "Heather", part)
 
                 # Delay between split messages (simulate afterthought)
@@ -11341,11 +11465,11 @@ async def handle_text_message(event):
                 await asyncio.sleep(random.uniform(2.0, 4.0))
                 followup = get_followup_message()
                 try:
-                    async with client.action(event.input_chat, 'typing'):
+                    async with client.action(event.chat_id, 'typing'):
                         await asyncio.sleep(random.uniform(0.5, 1.0))
                 except Exception:
                     pass
-                await event.respond(followup)
+                await safe_send_text(chat_id, followup, event=event)
                 store_message(chat_id, "Heather", followup)
 
         # Record response for duplicate detection (use full original response)
@@ -12157,7 +12281,7 @@ if MONITORING_ENABLED:
 def run_monitoring():
     if MONITORING_ENABLED:
         main_logger.info(f"Starting monitoring on port {MONITORING_PORT}")
-        monitor_app.run(host='127.0.0.1', port=MONITORING_PORT, debug=False, use_reloader=False)
+        monitor_app.run(host='0.0.0.0', port=MONITORING_PORT, debug=False, use_reloader=False)
 
 # ============================================================================
 # MAIN ENTRY POINT

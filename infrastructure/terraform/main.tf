@@ -178,6 +178,14 @@ resource "aws_security_group" "alb" {
   vpc_id      = aws_vpc.main.id
 
   ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = var.allowed_cidr_blocks
+    description = "HTTP from allowed IPs"
+  }
+
+  ingress {
     from_port   = 443
     to_port     = 443
     protocol    = "tcp"
@@ -205,10 +213,6 @@ resource "aws_ecr_repository" "bot" {
     scan_on_push = true
   }
 
-  encryption_configuration {
-    encryption_type = "KMS"
-    kms_key         = aws_kms_key.main.arn
-  }
 }
 
 resource "aws_ecr_lifecycle_policy" "bot" {
@@ -234,7 +238,7 @@ resource "aws_ecr_lifecycle_policy" "bot" {
 resource "aws_kms_key" "main" {
   description             = "KellyFindomBot encryption key"
   deletion_window_in_days = 7
-  enable_key_rotation     = true
+  enable_key_rotation     = false
 }
 
 resource "aws_kms_alias" "main" {
@@ -249,7 +253,6 @@ resource "aws_kms_alias" "main" {
 resource "aws_secretsmanager_secret" "bot_secrets" {
   name        = "kellyfindombot/${var.environment}/secrets"
   description = "KellyFindomBot all credentials"
-  kms_key_id  = aws_kms_key.main.arn
 
   recovery_window_in_days = 7
 }
@@ -299,8 +302,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "media" {
   bucket = aws_s3_bucket.media.id
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm     = "aws:kms"
-      kms_master_key_id = aws_kms_key.main.arn
+      sse_algorithm = "AES256"
     }
   }
 }
@@ -326,8 +328,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "tfstate" {
   bucket = aws_s3_bucket.tfstate.id
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm     = "aws:kms"
-      kms_master_key_id = aws_kms_key.main.arn
+      sse_algorithm = "AES256"
     }
   }
 }
@@ -426,7 +427,6 @@ resource "aws_ecs_cluster" "main" {
 resource "aws_cloudwatch_log_group" "bot" {
   name              = "/ecs/${local.name_prefix}/bot"
   retention_in_days = 30
-  kms_key_id        = aws_kms_key.main.arn
 }
 
 resource "aws_ecs_task_definition" "bot" {
@@ -474,7 +474,7 @@ resource "aws_ecs_task_definition" "bot" {
     }
 
     healthCheck = {
-      command     = ["CMD-SHELL", "curl -f http://localhost:8888/health || exit 1"]
+      command     = ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8888/health', timeout=5)\" || exit 1"]
       interval    = 60
       timeout     = 10
       retries     = 3
@@ -544,25 +544,42 @@ resource "aws_ecs_service" "bot" {
 resource "aws_efs_file_system" "profiles" {
   creation_token  = "${local.name_prefix}-profiles"
   encrypted       = true
-  kms_key_id      = aws_kms_key.main.arn
   throughput_mode = "bursting"
 }
 
 resource "aws_efs_access_point" "profiles" {
   file_system_id = aws_efs_file_system.profiles.id
-  posix_user     = { uid = 1000, gid = 1000 }
-  root_directory = {
+  posix_user {
+    uid = 1000
+    gid = 1000
+  }
+
+  root_directory {
     path = "/profiles"
-    creation_info = { owner_uid = 1000, owner_gid = 1000, permissions = "755" }
+
+    creation_info {
+      owner_uid   = 1000
+      owner_gid   = 1000
+      permissions = "755"
+    }
   }
 }
 
 resource "aws_efs_access_point" "logs" {
   file_system_id = aws_efs_file_system.profiles.id
-  posix_user     = { uid = 1000, gid = 1000 }
-  root_directory = {
+  posix_user {
+    uid = 1000
+    gid = 1000
+  }
+
+  root_directory {
     path = "/logs"
-    creation_info = { owner_uid = 1000, owner_gid = 1000, permissions = "755" }
+
+    creation_info {
+      owner_uid   = 1000
+      owner_gid   = 1000
+      permissions = "755"
+    }
   }
 }
 
@@ -619,23 +636,12 @@ resource "aws_lb_target_group" "dashboard" {
 
 resource "aws_lb_listener" "https" {
   load_balancer_arn = aws_lb.main.arn
-  port              = 443
-  protocol          = "HTTPS"
-  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = aws_acm_certificate.dashboard.arn
+  port              = 80
+  protocol          = "HTTP"
 
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.dashboard.arn
-  }
-}
-
-resource "aws_acm_certificate" "dashboard" {
-  domain_name       = var.dashboard_domain
-  validation_method = "DNS"
-
-  lifecycle {
-    create_before_destroy = true
   }
 }
 
@@ -684,8 +690,7 @@ resource "aws_cloudwatch_metric_alarm" "bot_memory" {
 }
 
 resource "aws_sns_topic" "alerts" {
-  name              = "${local.name_prefix}-alerts"
-  kms_master_key_id = aws_kms_key.main.id
+  name = "${local.name_prefix}-alerts"
 }
 
 resource "aws_sns_topic_subscription" "alerts_email" {

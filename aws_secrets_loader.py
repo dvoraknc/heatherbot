@@ -16,6 +16,8 @@ import os
 import sys
 import json
 import logging
+import base64
+import binascii
 
 logger = logging.getLogger("secrets_loader")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [SECRETS] %(message)s")
@@ -97,6 +99,9 @@ def inject_env(secrets: dict):
         "TEXT_AI_PORT": _from_secret_or_env(secrets, "text_ai_port", "TEXT_AI_PORT", default="1234"),
         "IMAGE_AI_PORT": _from_secret_or_env(secrets, "image_ai_port", "IMAGE_AI_PORT", default="11434"),
         "TTS_PORT": _from_secret_or_env(secrets, "tts_port", "TTS_PORT", default="5001"),
+        # Groq cloud LLM (free, OpenAI-compatible)
+        "GROQ_API_KEY": _from_secret_or_env(secrets, "groq_api_key", "GROQ_API_KEY"),
+        "GROQ_MODEL": _from_secret_or_env(secrets, "groq_model", "GROQ_MODEL", default="llama-3.3-70b-versatile"),
     }
     for key, val in mapping.items():
         if val:
@@ -108,11 +113,11 @@ def maybe_restore_session_from_s3():
     """Restore Telethon session from S3 when running in AWS and session is missing."""
     if os.path.exists(TELEGRAM_SESSION_FILE):
         logger.info("✓ Telegram session file already present")
-        return
+        return True
 
     if not S3_MEDIA_BUCKET:
         logger.warning("S3_MEDIA_BUCKET not set and no local session file found")
-        return
+        return False
 
     try:
         import boto3
@@ -122,15 +127,65 @@ def maybe_restore_session_from_s3():
         s3 = boto3.client("s3", region_name=AWS_REGION)
         s3.download_file(S3_MEDIA_BUCKET, S3_SESSION_KEY, TELEGRAM_SESSION_FILE)
         logger.info(f"✓ Session restored to {TELEGRAM_SESSION_FILE}")
+        return True
     except ImportError:
         logger.error("boto3 not installed — cannot restore session from S3")
         sys.exit(1)
     except ClientError as e:
         code = e.response["Error"].get("Code", "Unknown")
-        logger.error(f"S3 session restore failed [{code}]: {e}")
-        sys.exit(1)
+        logger.warning(f"S3 session restore failed [{code}]: {e}")
+        return False
     except Exception as e:
-        logger.error(f"Failed to restore Telegram session from S3: {e}")
+        logger.warning(f"Failed to restore Telegram session from S3: {e}")
+        return False
+
+
+def maybe_restore_session_from_secrets(secrets: dict) -> bool:
+    """Restore Telethon session from secrets payload if available."""
+    if os.path.exists(TELEGRAM_SESSION_FILE):
+        return True
+
+    session_b64 = _first_present(
+        secrets,
+        "telegram_session_b64",
+        "TELEGRAM_SESSION_B64",
+        default=os.getenv("TELEGRAM_SESSION_B64", ""),
+    )
+    if session_b64:
+        try:
+            raw = base64.b64decode(session_b64)
+            with open(TELEGRAM_SESSION_FILE, "wb") as f:
+                f.write(raw)
+            logger.info(f"✓ Session restored from secret blob to {TELEGRAM_SESSION_FILE}")
+            return True
+        except (binascii.Error, ValueError) as e:
+            logger.error(f"Invalid TELEGRAM_SESSION_B64 content: {e}")
+            sys.exit(1)
+
+    session_string = _first_present(
+        secrets,
+        "telegram_string_session",
+        "TELEGRAM_STRING_SESSION",
+        default=os.getenv("TELEGRAM_STRING_SESSION", ""),
+    )
+    if session_string:
+        os.environ["TELEGRAM_STRING_SESSION"] = session_string
+        logger.info("✓ Telegram string session loaded from secrets")
+        return True
+
+    return False
+
+
+def validate_telegram_auth_source():
+    """Require at least one non-interactive Telegram auth source for ECS runtime."""
+    has_file = os.path.exists(TELEGRAM_SESSION_FILE)
+    has_string = bool(os.getenv("TELEGRAM_STRING_SESSION", "").strip())
+    if not has_file and not has_string:
+        logger.error(
+            "No Telegram auth material found. Provide one of: "
+            "telegram_string_session, telegram_session_b64, or S3 object "
+            f"s3://{S3_MEDIA_BUCKET}/{S3_SESSION_KEY}."
+        )
         sys.exit(1)
 
 
@@ -154,10 +209,13 @@ def main():
     if USE_AWS:
         secrets = load_from_secrets_manager()
         inject_env(secrets)
-        maybe_restore_session_from_s3()
+        restored = maybe_restore_session_from_secrets(secrets)
+        if not restored:
+            maybe_restore_session_from_s3()
     else:
         logger.info("USE_AWS_SECRETS=false — reading from environment / .env directly")
 
+    validate_telegram_auth_source()
     validate_runtime_config()
 
     # Exec the bot process (replaces this process — PID 1 in container)
