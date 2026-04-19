@@ -26,15 +26,26 @@ USE_AWS     = os.getenv("USE_AWS_SECRETS", "true").lower() == "true"
 S3_MEDIA_BUCKET = os.getenv("S3_MEDIA_BUCKET", "")
 S3_SESSION_KEY = os.getenv("S3_SESSION_KEY", "session/kelly_session.session")
 TELEGRAM_SESSION_FILE = os.getenv("TELEGRAM_SESSION_FILE", "kelly_session.session")
+KELLY_PERSONA_NAMES = ("kelly", "findom")
 
 
 def _first_present(secrets: dict, *keys: str, default: str = "") -> str:
-    """Return first non-empty value from secrets for any of the provided keys."""
+    """Return first non-empty secret value, checking keys in the given order."""
     for key in keys:
         val = secrets.get(key)
         if val is not None and str(val).strip() != "":
             return str(val)
     return default
+
+
+def _from_secret_or_env(secrets: dict, secret_key: str, env_key: str, default: str = "") -> str:
+    """Resolve value with precedence: secret_key/lower, secret_key/upper, env, fallback."""
+    return _first_present(
+        secrets,
+        secret_key,
+        secret_key.upper(),
+        default=os.getenv(env_key, default),
+    )
 
 
 def load_from_secrets_manager() -> dict:
@@ -65,32 +76,27 @@ def inject_env(secrets: dict):
     """Inject secrets as environment variables for the child process."""
     mapping = {
         # Telegram
-        "TELEGRAM_API_ID": _first_present(secrets, "telegram_api_id", "TELEGRAM_API_ID"),
-        "TELEGRAM_API_HASH": _first_present(secrets, "telegram_api_hash", "TELEGRAM_API_HASH"),
-        "ADMIN_USER_ID": _first_present(secrets, "admin_user_id", "ADMIN_USER_ID"),
-        "BOT_PERSONA": _first_present(
-            secrets, "bot_persona", "BOT_PERSONA", default=os.getenv("BOT_PERSONA", "kelly")
-        ),
-        "ENABLE_MONETIZATION": _first_present(
-            secrets,
-            "enable_monetization",
-            "ENABLE_MONETIZATION",
-            default=os.getenv("ENABLE_MONETIZATION", "true"),
+        "TELEGRAM_API_ID": _from_secret_or_env(secrets, "telegram_api_id", "TELEGRAM_API_ID"),
+        "TELEGRAM_API_HASH": _from_secret_or_env(secrets, "telegram_api_hash", "TELEGRAM_API_HASH"),
+        "ADMIN_USER_ID": _from_secret_or_env(secrets, "admin_user_id", "ADMIN_USER_ID"),
+        "BOT_PERSONA": _from_secret_or_env(secrets, "bot_persona", "BOT_PERSONA", default="kelly"),
+        "ENABLE_MONETIZATION": _from_secret_or_env(
+            secrets, "enable_monetization", "ENABLE_MONETIZATION", default="true"
         ),
         # Payment bot
-        "PAYMENT_BOT_TOKEN": _first_present(secrets, "payment_bot_token", "PAYMENT_BOT_TOKEN"),
-        "PAYMENT_BOT_USERNAME": _first_present(secrets, "payment_bot_username", "PAYMENT_BOT_USERNAME"),
+        "PAYMENT_BOT_TOKEN": _from_secret_or_env(secrets, "payment_bot_token", "PAYMENT_BOT_TOKEN"),
+        "PAYMENT_BOT_USERNAME": _from_secret_or_env(secrets, "payment_bot_username", "PAYMENT_BOT_USERNAME"),
         # ElevenLabs TTS
-        "ELEVENLABS_API_KEY": _first_present(secrets, "elevenlabs_api_key", "ELEVENLABS_API_KEY"),
-        "ELEVENLABS_VOICE_ID": _first_present(secrets, "elevenlabs_voice_id", "ELEVENLABS_VOICE_ID"),
+        "ELEVENLABS_API_KEY": _from_secret_or_env(secrets, "elevenlabs_api_key", "ELEVENLABS_API_KEY"),
+        "ELEVENLABS_VOICE_ID": _from_secret_or_env(secrets, "elevenlabs_voice_id", "ELEVENLABS_VOICE_ID"),
         # Monitoring
-        "MONITOR_AUTH_TOKEN": _first_present(secrets, "monitor_auth_token", "MONITOR_AUTH_TOKEN"),
+        "MONITOR_AUTH_TOKEN": _from_secret_or_env(secrets, "monitor_auth_token", "MONITOR_AUTH_TOKEN"),
         # ComfyUI / image gen
-        "COMFYUI_FACE_IMAGE": _first_present(secrets, "comfyui_face_image", "COMFYUI_FACE_IMAGE"),
+        "COMFYUI_FACE_IMAGE": _from_secret_or_env(secrets, "comfyui_face_image", "COMFYUI_FACE_IMAGE"),
         # LLM endpoints
-        "TEXT_AI_PORT": _first_present(secrets, "text_ai_port", "TEXT_AI_PORT", default="1234"),
-        "IMAGE_AI_PORT": _first_present(secrets, "image_ai_port", "IMAGE_AI_PORT", default="11434"),
-        "TTS_PORT": _first_present(secrets, "tts_port", "TTS_PORT", default="5001"),
+        "TEXT_AI_PORT": _from_secret_or_env(secrets, "text_ai_port", "TEXT_AI_PORT", default="1234"),
+        "IMAGE_AI_PORT": _from_secret_or_env(secrets, "image_ai_port", "IMAGE_AI_PORT", default="11434"),
+        "TTS_PORT": _from_secret_or_env(secrets, "tts_port", "TTS_PORT", default="5001"),
     }
     for key, val in mapping.items():
         if val:
@@ -131,12 +137,12 @@ def maybe_restore_session_from_s3():
 def validate_runtime_config():
     """Fail fast on runtime configs that would break monetized Kelly go-live."""
     monetization_on = os.getenv("ENABLE_MONETIZATION", "true").lower() == "true"
-    kelly_mode = os.getenv("BOT_PERSONA", "").lower() in ("kelly", "findom")
+    kelly_mode = os.getenv("BOT_PERSONA", "").lower() in KELLY_PERSONA_NAMES
     payment_token = os.getenv("PAYMENT_BOT_TOKEN", "").strip()
 
     if kelly_mode and monetization_on and not payment_token:
         logger.error(
-            "PAYMENT_BOT_TOKEN is required when BOT_PERSONA=kelly and ENABLE_MONETIZATION=true; "
+            "PAYMENT_BOT_TOKEN is required when BOT_PERSONA is kelly/findom and ENABLE_MONETIZATION=true; "
             "refusing to start because users would be gated but unable to pay."
         )
         sys.exit(1)

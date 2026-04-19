@@ -42,6 +42,13 @@ class TestAwsSecretsLoader(unittest.TestCase):
         with self.assertRaises(SystemExit):
             loader.validate_runtime_config()
 
+    def test_validate_runtime_config_requires_payment_token_for_live_findom(self):
+        os.environ["BOT_PERSONA"] = "findom"
+        os.environ["ENABLE_MONETIZATION"] = "true"
+        os.environ.pop("PAYMENT_BOT_TOKEN", None)
+        with self.assertRaises(SystemExit):
+            loader.validate_runtime_config()
+
     def test_validate_runtime_config_allows_non_monetized_kelly_without_payment_token(self):
         os.environ["BOT_PERSONA"] = "kelly"
         os.environ["ENABLE_MONETIZATION"] = "false"
