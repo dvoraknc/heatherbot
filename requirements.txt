@@ -1,0 +1,7 @@
+telethon>=1.36
+flask>=3.0
+pyyaml>=6.0
+requests>=2.31
+Pillow>=10.0
+python-dotenv>=1.0
+cryptg>=0.4
