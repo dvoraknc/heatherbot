@@ -1,10 +1,10 @@
 # HeatherBot
 
-**A fully local AI companion chatbot ecosystem for Telegram — with multi-platform funnel automation.**
+**A fully local, persona-driven AI companion chatbot for Telegram (with an optional Discord bridge).**
 
 HeatherBot is a Telegram userbot (MTProto via Telethon) that runs entirely on your own hardware. No cloud APIs, no OpenAI, no subscriptions. Just a local LLM, a persona YAML file, and a stack of services that make the bot feel like a real person texting.
 
-The ecosystem includes the core Telegram companion bot, a multi-platform outreach dashboard (Reddit + FetLife), and an autonomous management agent — all running locally.
+The core is the Telegram companion bot plus its persona, memory, media, and post-processing pipeline. An optional Discord bridge runs the same character in Discord. Everything runs locally.
 
 The thesis: a well-scaffolded 12B parameter model with the right persona engineering, adaptive kink personas, content pipeline, and post-processing can deliver a compelling companion experience that rivals cloud-hosted solutions — while keeping everything private and under your control.
 
@@ -26,25 +26,16 @@ The thesis: a well-scaffolded 12B parameter model with the right persona enginee
                |   (Telethon)      |     |    port 5001      |
                |  + Flask monitor  |     +-------------------+
                |    port 8888      |
-               +--------+----------+
-                        |
-           +------------+------------+
-           |                         |
-  +--------+----------+     +--------+----------+
-  |  Frank Dashboard  |     |   OpenClaw MGMT   |
-  | (Reddit+FetLife)  |     | (Autonomous Agent)|
-  |    port 8080      |     |   @your_mgmt_bot  |
-  +-------------------+     +-------------------+
+               +-------------------+
 ```
 
-| Service | Port | Purpose |
-|---------|------|---------|
-| llama-server | 1234 | Text generation (llama.cpp with any GGUF model) |
-| Ollama | 11434 | Image analysis (LLaVA or similar vision model) |
-| ComfyUI | 8188 | Image generation (FLUX.1 dev FP8) with face-swap workflows |
-| Chatterbox TTS | 5001 | Voice synthesis (voice cloning) |
-| Bot Monitor | 8888 | Web dashboard for analytics and admin |
-| Frank Dashboard | 8080 | Multi-platform outreach (Reddit + FetLife auto-funnel) |
+| Service | Port | Required | Purpose |
+|---------|------|----------|---------|
+| llama-server | 1234 | Yes | Text generation (llama.cpp with any GGUF model) |
+| Ollama | 11434 | No | Image analysis (LLaVA) + embeddings for vector memory |
+| ComfyUI | 8188 | No | Image generation (FLUX.1 / SDXL) with face-swap workflows |
+| Chatterbox TTS | 5001 | No | Local voice synthesis (ElevenLabs API is the cloud option) |
+| Bot Monitor | 8888 | No | Web dashboard for analytics and admin (`--monitoring`) |
 
 ## Features
 
@@ -73,25 +64,12 @@ The thesis: a well-scaffolded 12B parameter model with the right persona enginee
 - **Automatic detection** — 21 keyword categories score every user message in real-time
 - **Phased injection** — Messages 1-3: warmth (no persona). Messages 4-9: light hints. Messages 10+: full persona injection with specific phrases, session flow, and cuckold integration.
 - **Per-user tracking** — Active persona stored in each user's profile JSON with kink name and score
-- **Persona definitions** in `heather_kink_personas.yaml` — each persona includes core traits, verbal responses, physical details, session flow, and cuckold/Frank integration
+- **Persona definitions** in `heather_kink_personas.yaml` — each persona includes core traits, verbal responses, physical details, and session flow
 
-### Frank Dashboard (Multi-Platform Outreach)
-- **Reddit + FetLife automation** — Two Playwright browsers manage conversations on both platforms simultaneously
-- **Stage-aware Frank AI** — Dolphin 12B generates responses as "Frank" (cuckold husband character) with 3-stage conversation strategy: rapport building → Telegram pitch → post-pitch follow-up
-- **Auto-send** — Replies are automatically queued with 2-8 minute random delays (human texting pace). Hold keywords flag risky messages for manual review.
-- **Reddit chat layers** — Handles standard chats, regular Requests, and NSFW Additional Requests (all three layers automated)
-- **Catch-up replier** — Background task scans database every 2 minutes for conversations where the last message is inbound and auto-replies
-- **Unified dashboard** — Web UI at port 8080 with platform badges (R/FL), conversation management, AI suggestion approval, and metrics
-- **Transparent digital twin pitch** — Frank sells both "live Heather on Telegram" and "filthy digital twin with zero guardrails" as VIP access
-
-### Autonomous Management (OpenClaw MGMT)
-- **Heartbeat monitoring** — 30-minute cycle checks all services, error rates, engagement metrics
-- **Dashboard monitoring** — Confirms Frank Dashboard health, reports metrics every 4 hours
-- **Kink persona reporting** — Scans user profiles for persona distribution, reports trends
-- **Personality tuning** — Authorized to edit persona YAML directly for prompt tweaks
-- **User engagement research** — Analyzes bot logs for satisfaction patterns, builds optimization briefs
-- **Dashboard restart** — Authorized to restart the Frank Dashboard (but NOT HeatherBot)
-- **Delegation model** — OpenClaw diagnoses and recommends; Claude Code implements all code changes
+### Discord Bridge (Optional)
+- **Same persona on Discord** — `heather_discord_bot.py` runs the character in Discord servers/DMs, sharing the persona YAML and memory system
+- **Daily story poster** — `daily_story_poster.py` posts a scheduled story to a channel
+- Requires `discord.py` + `httpx` (listed as optional extras in `requirements.txt`) and a `DISCORD_TOKEN`
 
 ## Hardware Requirements
 
@@ -111,19 +89,18 @@ The bot is designed for consumer hardware. A single RTX 3090 can run the text mo
 
 Install these before setting up the bot:
 
-1. **[llama.cpp](https://github.com/ggerganov/llama.cpp)** — Download a GGUF model (12B+ recommended) and the `llama-server` binary
-2. **[Ollama](https://ollama.ai)** — Install and pull a vision model: `ollama pull llava`
-3. **[ComfyUI](https://github.com/comfyanonymous/ComfyUI)** — For image generation (optional)
-4. **[Chatterbox TTS](https://github.com/resemble-ai/chatterbox)** — For voice messages (optional)
-5. **[Playwright](https://playwright.dev/)** — For Reddit/FetLife dashboard: `playwright install chromium`
-6. **Python 3.10+**
-7. **Telegram account** — Register API credentials at [my.telegram.org](https://my.telegram.org)
+1. **[llama.cpp](https://github.com/ggerganov/llama.cpp)** — Download a GGUF model (12B+ recommended) and the `llama-server` binary **(required)**
+2. **[Ollama](https://ollama.ai)** — For image analysis (`ollama pull llava`) and vector-memory embeddings (`ollama pull nomic-embed-text`) *(optional)*
+3. **[ComfyUI](https://github.com/comfyanonymous/ComfyUI)** — For image generation *(optional)*
+4. **[Chatterbox TTS](https://github.com/resemble-ai/chatterbox)** — For local voice messages *(optional)*
+5. **Python 3.11**
+6. **Telegram account** — Register API credentials at [my.telegram.org](https://my.telegram.org) **(required)**
 
 ## Installation
 
 ```bash
 # Clone the repo
-git clone https://github.com/youruser/heatherbot.git
+git clone https://github.com/dvoraknc/heatherbot.git
 cd heatherbot
 
 # Create virtual environment
@@ -226,14 +203,14 @@ python heather_telegram_bot.py --monitoring --small-model --personality heather_
 
 First run will prompt for your Telegram phone number and verification code. Subsequent runs use the saved session file.
 
-### Running the Frank Dashboard (Optional)
+### Running the Discord Bridge (Optional)
 
 ```bash
-cd heather-reddit
-python -m uvicorn app:app --host 127.0.0.1 --port 8080
+pip install discord.py httpx
+python heather_discord_bot.py
 ```
 
-Opens two browser windows (Reddit + FetLife) and starts autonomous conversation management.
+Requires `DISCORD_TOKEN` in `.env`. Runs the same persona and memory system in Discord.
 
 ### CLI Arguments
 
