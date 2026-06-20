@@ -277,7 +277,7 @@ def universal_cleanup(ai_response: str) -> Tuple[str, List[str]]:
     # (name + emoji that the bot sometimes uses as a signature/header).
     _pre = ai_response
     ai_response = re.sub(
-        r'^(?:Heather(?:\s+(?:Dvorak|Buchholz|B))?|Jen(?:\s+Dvorak)?)'
+        r'^(?:Heather(?:\s+(?:Dvorak))?|Jen(?:\s+Dvorak)?)'
         r'[ \t]*'
         r'(?:'
         r':\s*'
@@ -293,7 +293,7 @@ def universal_cleanup(ai_response: str) -> Tuple[str, List[str]]:
     # Strip bio/header preamble — "Heather Dvorak - Kirkland WA", "Heather - 48, MILF", etc.
     _pre = ai_response
     ai_response = re.sub(
-        r'^Heather(?:\s+(?:Dvorak|Buchholz|B))?\s*[-\u2013\u2014]\s*'
+        r'^Heather(?:\s+(?:Dvorak))?\s*[-\u2013\u2014]\s*'
         r'(?:'
         r'[A-Z][A-Za-z, ]{2,30}(?:MILF|Mom|Uber|Driver|Wife)\b[^\n]*'  # Role-based
         r'|(?:Kirkland|Bellevue|Seattle|Washington|WA)\b[^\n]*'  # Location-based
@@ -309,7 +309,7 @@ def universal_cleanup(ai_response: str) -> Tuple[str, List[str]]:
     # Strip parenthetical bio tagline — "(Heather Dvorak, 48, Kirkland WA widow - ready to chat!)"
     _pre = ai_response
     ai_response = re.sub(
-        r'\s*\(Heather(?:\s+(?:Dvorak|Buchholz|B))?[^)]{0,80}\)\s*',
+        r'\s*\(Heather(?:\s+(?:Dvorak))?[^)]{0,80}\)\s*',
         '', ai_response, flags=re.IGNORECASE
     ).strip()
     if not ai_response and _pre:
@@ -348,7 +348,7 @@ def universal_cleanup(ai_response: str) -> Tuple[str, List[str]]:
     # legit first-person chat.
     _pre = ai_response
     ai_response = re.sub(
-        r'^(?:(?:Heather(?:\s+(?:Dvorak|Buchholz|B))?|Her|She)\s+'
+        r'^(?:(?:Heather(?:\s+(?:Dvorak))?|Her|She)\s+'
         r'(?:[a-z][a-z\']+(?:\s+(?:her|his|its|the|a|an|my))?\s+)?'
         r'[a-z][a-z\']+[^.!?\n]{0,200}[.!?])\s*',
         '', ai_response, flags=re.MULTILINE
@@ -441,17 +441,17 @@ def universal_cleanup(ai_response: str) -> Tuple[str, List[str]]:
     # Bio-style self-introduction ("I'm Heather, 48", "I'm Heather Dvorak — 48-year-old Kirkland widow", etc.)
     _pre = ai_response
     ai_response = re.sub(
-        r"^(?:I[''']?m\s+Heather(?:\s+(?:Dvorak|Buchholz|B))?(?:\s*[,\-–—]\s*|\s+)\d{1,3}[\-\s,][^.!?\n]{0,200}[.!?])\s*",
+        r"^(?:I[''']?m\s+Heather(?:\s+(?:Dvorak))?(?:\s*[,\-–—]\s*|\s+)\d{1,3}[\-\s,][^.!?\n]{0,200}[.!?])\s*",
         '', ai_response, flags=re.IGNORECASE
     ).strip()
     ai_response = re.sub(
-        r"^Heather(?:\s+(?:Dvorak|Buchholz|B))?\s+here[,\s][^.!?\n]{0,200}[.!?]\s*",
+        r"^Heather(?:\s+(?:Dvorak))?\s+here[,\s][^.!?\n]{0,200}[.!?]\s*",
         '', ai_response, flags=re.IGNORECASE
     ).strip()
-    # Bare name as entire response — "Heather Dvorak", "Heather Buchholz",
+    # Bare name as entire response — "Heather Dvorak",
     # "Heather Dvorak 💜", "Heather 💋", etc. (name + optional emoji signature)
     if re.fullmatch(
-        r'Heather(?:\s+(?:Dvorak|Buchholz|B))?\s*[☀-➿️\U0001F300-\U0001FAFF]*[.!?]?',
+        r'Heather(?:\s+(?:Dvorak))?\s*[☀-➿️\U0001F300-\U0001FAFF]*[.!?]?',
         ai_response,
         flags=re.IGNORECASE,
     ):

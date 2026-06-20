@@ -6720,11 +6720,11 @@ def get_text_ai_response(chat_id: int, user_message: str, retry_count: int = 0, 
             if not ai_response and _raw_response: _cleanup_trace.append('think_tags')
             # Remove character name prefix ("Heather Dvorak: ..." or "Heather Dvorak\n\n..." or "Heather Dvorak - 3:12 PM")
             _pre = ai_response
-            ai_response = re.sub(r'^(?:Heather(?:\s+(?:Dvorak|Buchholz|B))?|Jen(?:\s+Dvorak)?)[ \t]*(?::\s*|\n+|-\s*\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?\s*\n*)', '', ai_response, flags=re.IGNORECASE).strip()
+            ai_response = re.sub(r'^(?:Heather(?:\s+(?:Dvorak))?|Jen(?:\s+Dvorak)?)[ \t]*(?::\s*|\n+|-\s*\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?\s*\n*)', '', ai_response, flags=re.IGNORECASE).strip()
             if not ai_response and _pre: _cleanup_trace.append('name_prefix')
             # Strip "Heather Dvorak - Kirkland WA MILF" or similar bio/header preamble
             _pre = ai_response
-            ai_response = re.sub(r'^Heather(?:\s+(?:Dvorak|Buchholz|B))?\s*[-–—]\s*[A-Z][A-Za-z, ]{2,30}(?:MILF|Mom|Uber|Driver|Wife)\b[^\n]*\n*', '', ai_response, flags=re.IGNORECASE).strip()
+            ai_response = re.sub(r'^Heather(?:\s+(?:Dvorak))?\s*[-–—]\s*[A-Z][A-Za-z, ]{2,30}(?:MILF|Mom|Uber|Driver|Wife)\b[^\n]*\n*', '', ai_response, flags=re.IGNORECASE).strip()
             if not ai_response and _pre: _cleanup_trace.append('bio_header')
             # Remove markdown headers ("# Heather Dvorak" or "## Response")
             _pre = ai_response

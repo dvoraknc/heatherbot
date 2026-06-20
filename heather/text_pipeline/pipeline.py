@@ -154,7 +154,7 @@ _MALFORMED_PATTERNS = [
      'bare_date'),
     # Bio dump intro — "I'm Heather, 48", "I'm Heather Dvorak — 48-year-old Kirkland widow"
     # (catches even truncated mid-sentence, where the cleanup regex would miss it.)
-    (_re_malformed.compile(r"^\s*I[''’]?m\s+Heather(?:\s+(?:Dvorak|Buchholz|B))?(?:\s*[,\-–—]\s*|\s+)\d{1,3}", _re_malformed.IGNORECASE),
+    (_re_malformed.compile(r"^\s*I[''’]?m\s+Heather(?:\s+(?:Dvorak))?(?:\s*[,\-–—]\s*|\s+)\d{1,3}", _re_malformed.IGNORECASE),
      'bio_dump'),
 ]
 
