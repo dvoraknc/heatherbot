@@ -8,6 +8,8 @@ The ecosystem includes the core Telegram companion bot, a multi-platform outreac
 
 The thesis: a well-scaffolded 12B parameter model with the right persona engineering, adaptive kink personas, content pipeline, and post-processing can deliver a compelling companion experience that rivals cloud-hosted solutions — while keeping everything private and under your control.
 
+> **Setting it up?** See **[AGENTS.md](AGENTS.md)** — a detailed, ordered bootstrap runbook written so a coding agent (Claude Code, Codex) *or* a human can stand the system up on a fresh machine, including the local-LLM, memory, and optional-service setup. Start there.
+
 ## Architecture
 
 ```
