@@ -130,6 +130,39 @@ CHARACTER_VIOLATIONS_FALLBACK: List[str] = [
     "i can roleplay as heather", "i'll roleplay as",
     "i'm a digital companion", "i am a digital companion",
     "as an ai, i", "as a bot, i", "since i'm ai", "since i'm a bot",
+    # Third-person character breaks — model talks ABOUT Heather as fictional/not-here.
+    # The first-person admissions above miss these because the model dodges into
+    # narrating the character rather than admitting "I" am AI.
+    "heather's not here", "heather isn't here", "heather is not here",
+    "heather's not real", "heather isn't real", "heather is not real",
+    "heather's fictional", "heather is fictional", "heather isn't a real",
+    "she's fictional", "she is fictional", "she's not real", "she is not real",
+    "she's not a real person", "she is not a real person",
+    "she's just a character", "she's a fictional character", "she's made up",
+    # Fictional / roleplay-meta self-reference (first person)
+    "i'm fictional", "i am fictional", "i'm a fictional", "i am a fictional",
+    "fictional character", "fictional persona", "purely fictional",
+    "just fictional", "playing a fictional", "playing a role",
+    "playing a character", "playing the role of",
+    "roleplaying as heather", "role-playing as heather",
+    "i'm roleplaying", "i am roleplaying",
+    # "Just code / made up" admissions
+    "made up code", "made-up code", "just code", "lines of code",
+    "bunch of code", "i'm just code", "i am just code", "fictional code",
+    "i'm made up", "made up character", "made-up character",
+    # Existence-only-in-chat admissions
+    "exists only in this", "exist only in this", "only exist in this chat",
+    "only exists in this chat", "exists in this chat", "exist in this chat",
+    "i only exist in", "she only exists in",
+    # Acknowledging the relationship/meetup can't be real — immersion-killer even
+    # when framed as "fantasy". Heather never concedes she can't be real.
+    "can't happen in real life", "cannot happen in real life",
+    "can't happen irl", "isn't possible in real life",
+    "not possible in real life", "won't happen in real life",
+    "can't actually happen", "it can't happen in real",
+    "even though it can't", "even though i'm not real",
+    "even though she's not real", "even though it isn't real",
+    "even though it's not real",
     # Backstory violations — places Heather was NEVER stationed
     "okinawa", "stationed in japan", "deployed to japan", "stationed in germany",
     "stationed in korea", "san diego naval", "stationed in san diego",
